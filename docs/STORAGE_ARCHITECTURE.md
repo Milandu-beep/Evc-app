@@ -1,6 +1,6 @@
 # Architecture du stockage
 
-Version : 2.0 — Statut : **validé sur le principe (limites, nettoyage, originaux conservés)**
+Version : 2.1 — Statut : **validé sur le principe ; arborescence et vidéos ajoutées, en attente des accès Cloudinary / Supabase**
 Références : `PROJECT_CHARTER.md` §5 (Stockage) et §10 (Médiathèque).
 
 ## 1. Principes
@@ -8,7 +8,7 @@ Références : `PROJECT_CHARTER.md` §5 (Stockage) et §10 (Médiathèque).
 1. **Un service unique, `StorageService`.** Les contrôleurs et les autres services ne savent
    pas où sont les fichiers : ils appellent `upload`, `delete`, `urlFor`.
 2. **Des fournisseurs interchangeables** derrière une interface :
-   `CloudinaryProvider` (images), `SupabaseStorageProvider` (PDF, audio),
+   `CloudinaryProvider` (images, vidéos), `SupabaseStorageProvider` (PDF, audio),
    `R2Provider` (futur, non implémenté en V1).
 3. **Le client ne parle jamais directement à un fournisseur** : `Client → API → fournisseur`.
    Les secrets n'existent que côté serveur.
@@ -24,28 +24,63 @@ Références : `PROJECT_CHARTER.md` §5 (Stockage) et §10 (Médiathèque).
 
 | Type | Fournisseur | Conteneur | Pourquoi |
 |---|---|---|---|
-| Images (JPEG, PNG, WebP) | **Cloudinary** | dossier `evc/{AAAA}/{MM}/` | CDN, WebP/AVIF automatique, redimensionnement par l'URL (`w_1200,f_auto,q_auto`) : aucune variante à stocker |
+| Images (JPEG, PNG, WebP) | **Cloudinary** | racine `EVC/` | CDN, WebP/AVIF automatique, redimensionnement par l'URL (`w_1200,f_auto,q_auto`) : aucune variante à stocker |
+| Vidéos (MP4, WebM) | **Cloudinary** | racine `EVC/` | Streaming adaptatif et miniatures générés par l'URL. Voir l'écart avec la charte au §3 |
 | PDF | **Supabase Storage** | bucket public `documents` | Compte déjà en place, pas de carte bancaire |
 | Audio MP3 | **Supabase Storage** | bucket public `audio` | idem |
-| Vidéos | **YouTube** (lien) | — | Charte §10 : pas de fichier vidéo en V1 |
+| Vidéos YouTube | **YouTube** (lien) | — | Reste le mode principal pour les longues vidéos (prédications) |
 
 Le choix du fournisseur est une table de correspondance dans `config/storage.js`
-(type de fichier → fournisseur). Passer les PDF et l'audio sur R2 plus tard = écrire
+(type de fichier → fournisseur). Passer des types sur R2 plus tard = écrire
 `R2Provider` et changer cette table ; les fichiers existants restent lisibles car chaque
 ligne `storage_files` mémorise son fournisseur.
+
+### Arborescence (identique chez tous les fournisseurs)
+
+Le dossier logique d'un fichier est choisi **à l'envoi** parmi une liste fermée
+(`config/storage.js`). La même arborescence sert de préfixe chez Cloudinary
+(`EVC/events/covers/…`) et dans les buckets Supabase (`events/documents/…`).
+
+```
+EVC/
+├── branding/      logos/   favicon/   pwa/                       images
+├── events/        covers/  gallery/   documents/                 images, images, PDF
+├── news/          covers/  gallery/                              images
+├── sermons/       audio/   thumbnails/   documents/              MP3, images, PDF
+├── gallery/       {AAAA}/  (2026, 2027…, créé automatiquement)   images, vidéos
+├── profiles/      pastors/ admins/    users/                     images
+└── temporary/                                                    tout type
+```
+
+- La racine (`EVC`) vient de la variable `STORAGE_ROOT` : `EVC` en production,
+  `EVC-dev` en développement, pour ne jamais mélanger les deux.
+- Une demande d'envoi avec un dossier inconnu, ou un type non autorisé dans ce dossier
+  (une vidéo dans `events/covers`, par exemple), est refusée (422).
+- `gallery/{AAAA}` : l'année est validée (2000 à année en cours + 1).
+- `temporary/` : destination provisoire quand le contenu n'existe pas encore. **Un fichier
+  n'est jamais déplacé** (clés immuables) : rattaché à un contenu, il garde sa clé. Les
+  fichiers non rattachés sont purgés par le nettoyage du §8.
+- Les vidéos n'ont pas de dossier dédié dans votre arborescence : elles vont dans
+  `gallery/{AAAA}`. Un dossier `sermons/videos` se rajoute en une ligne si besoin.
 
 ## 3. Formats et limites
 
 | Type | Formats | Taille max | Traitement avant envoi |
 |---|---|---|---|
 | Image | JPEG, PNG, WebP | 10 Mo | Rotation EXIF appliquée puis métadonnées EXIF supprimées (vie privée, GPS), lecture de `width`/`height`. Originaux conservés, sans variante |
+| Vidéo | MP4, WebM | 100 Mo | Durée et dimensions lues par Cloudinary |
 | PDF | `application/pdf` | 20 Mo | Aucun |
 | Audio | MP3 (`audio/mpeg`) | 50 Mo | Lecture de la durée |
 
-- Les 10 Mo des images correspondent à la limite d'envoi de l'offre gratuite Cloudinary ;
-  les 50 Mo de l'audio à celle de Supabase Storage (offre gratuite). Une offre payante
-  permet de les relever dans `config/constants.js`.
-- **SVG refusé** (peut contenir du script). GIF, HEIC, vidéo : hors V1.
+- Les limites suivent les offres gratuites : 10 Mo (image) et 100 Mo (vidéo) chez Cloudinary,
+  50 Mo par fichier chez Supabase Storage. Une offre payante permet de les relever dans
+  `config/constants.js`.
+- **Écart avec la charte §10** : la charte ne prévoyait que des vidéos YouTube. L'envoi de
+  vidéos MP4/WebM vers Cloudinary est une évolution demandée ; la charte passe en v1.3 pour
+  l'enregistrer. Les crédits gratuits de Cloudinary (stockage, bande passante et
+  transformations) sont partagés : surveiller la consommation et préférer YouTube pour les
+  vidéos longues.
+- **SVG refusé** (peut contenir du script). GIF, HEIC : hors V1.
 - Le type est **détecté par le contenu** (octets magiques), jamais par `Content-Type` ni par
   l'extension, falsifiables.
 - Multer applique la limite pendant la réception, avant tout envoi vers un fournisseur.
@@ -55,22 +90,26 @@ ligne `storage_files` mémorise son fournisseur.
 ## 4. Identifiants des objets
 
 ```
-Cloudinary : publicId = evc/{AAAA}/{MM}/{uuid}          (sans extension)
-Supabase   : chemin   = {AAAA}/{MM}/{uuid}.{ext}        dans le bucket documents ou audio
+Cloudinary : publicId = {racine}/{dossier}/{uuid}            ex. EVC/events/covers/7c1e…b2
+Supabase   : chemin   = {dossier}/{uuid}.{ext}               ex. sermons/audio/9a40…3f.mp3
 ```
 
 - `uuid` = identifiant de la ligne `storage_files`.
 - Extension déduite du type réel détecté, jamais du nom envoyé.
 - Le nom d'origine est conservé en base (`originalName`), assaini (pas de chemin, pas de
   caractères de contrôle, longueur limitée), pour l'affichage et le téléchargement.
-- Les dossiers de la médiathèque (Affiches, Prédications, Baptêmes…) sont des lignes
-  `media_folders`, **pas** des préfixes chez le fournisseur.
+- Le dossier logique est aussi enregistré en base (`storage_files.folder`, ex.
+  `events/covers`) pour filtrer et ranger sans interroger le fournisseur.
+- Les dossiers de la médiathèque visibles par les administrateurs (`media_folders`, ex.
+  Baptêmes, Séminaires) sont **distincts** de cette arborescence technique : ce sont des
+  étiquettes en base, modifiables sans toucher aux fichiers.
 
 ## 5. Flux d'envoi
 
 ```
 1. Authentification + rôle (Admin ou Super Admin) + limitation de débit
-2. Réception (Multer → fichier temporaire dans src/uploads/, supprimé dans tous les cas)
+2. Validation de la demande : dossier logique autorisé pour ce type (§2)
+   Réception (Multer → fichier temporaire dans src/uploads/, supprimé dans tous les cas)
 3. Détection du type réel, contrôle du format et de la taille
 4. Traitement (image : rotation + EXIF + dimensions ; audio : durée)
 5. Empreinte SHA-256
@@ -105,11 +144,12 @@ réellement privé irait dans un bucket privé avec URL signée à durée limit�
 ```
 storage_files
   id (uuid) · provider (enum StorageProvider : CLOUDINARY, SUPABASE, R2)
+  folder (dossier logique, ex. « events/covers », « gallery/2026 »)
   bucket? (Supabase : documents|audio ; vide pour Cloudinary) · objectKey (publicId ou chemin)
   originalName · mimeType · sizeBytes · checksumSha256 · etag?
   width? · height? · durationSeconds?
   uploadedById? → admins (SET NULL) · createdAt · deletedAt?
-  unique (provider, bucket, objectKey)    index (checksumSha256)    index (deletedAt)
+  unique (provider, bucket, objectKey)    index (checksumSha256)    index (folder)    index (deletedAt)
 
 media_folders
   id (uuid) · name · parentId? → media_folders (arborescence)
@@ -126,6 +166,9 @@ media_folders
 | `news` | `coverImage` (texte) | `coverImageId?` → `storage_files` |
 | `daily_messages` | — | `imageId?` → `storage_files` |
 | `church_settings` | — | `logoId?` → `storage_files` |
+
+L'enum `MediaType` gagne la valeur `VIDEO` (fichier vidéo hébergé), à côté de `YOUTUBE` (lien).
+Les lignes `media` elles-mêmes sont créées au Sprint 8 (Médiathèque) ; le Sprint 3 ne prépare que le schéma.
 
 Toutes les relations vers `storage_files` sont `SET NULL` : supprimer un fichier ne supprime
 jamais un contenu. Les tables concernées sont vides, la migration est sans risque.
@@ -189,6 +232,8 @@ SUPABASE_URL=                    # https://<projet>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=       # serveur uniquement
 SUPABASE_BUCKET_DOCUMENTS=documents
 SUPABASE_BUCKET_AUDIO=audio
+
+STORAGE_ROOT=EVC-dev             # EVC en production
 ```
 
 ## 12. Livrable du Sprint 3
@@ -196,9 +241,9 @@ SUPABASE_BUCKET_AUDIO=audio
 - Migration : `storage_files`, `media_folders`, clés étrangères, retrait des anciennes
   colonnes, RLS sur les nouvelles tables.
 - `StorageService` et les deux fournisseurs, middleware d'envoi, nettoyage.
-- Routes techniques `POST /api/storage/upload` et `DELETE /api/storage/:id`
+- Routes techniques `POST /api/storage/upload` (champs `file` et `folder`) et `DELETE /api/storage/:id`
   (Admin / Super Admin), sans logique métier d'événement ou d'actualité.
-- Tests réels : envoi de chaque type, refus d'un faux format, refus d'un fichier trop gros,
+- Tests réels : envoi de chaque type (image, vidéo, PDF, audio), refus d'un dossier ou d'un type non autorisé, refus d'un faux format, refus d'un fichier trop gros,
   dédoublonnage, échec base → nettoyage chez le fournisseur, nettoyage des orphelins.
 - Documentation (`API.md`, `DATABASE.md`).
 

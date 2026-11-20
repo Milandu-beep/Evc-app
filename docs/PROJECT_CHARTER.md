@@ -1,7 +1,7 @@
 # EVC APP - PROJECT CHARTER
-Version : 1.2
+Version : 1.3
 Statut : Validé
-Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible
+Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible ; 1.3 (2026-11-20) — vidéos hébergées (MP4/WebM) via Cloudinary en plus des liens YouTube
 Projet : Plateforme officielle de l'Église Vie Céleste (EVC)
 
 ---
@@ -99,7 +99,7 @@ OneSignal
 
 Via un service unique (StorageService) et des fournisseurs interchangeables :
 
-- Cloudinary : images
+- Cloudinary : images et vidéos
 - Supabase Storage : PDF et audio
 - Cloudflare R2 : évolution possible, sans modifier la logique métier
 
@@ -178,7 +178,8 @@ Formats supportés :
 - Images
 - PDF
 - MP3
-- Vidéos YouTube
+- Vidéos YouTube (liens)
+- Vidéos MP4/WebM hébergées (Cloudinary)
 
 ---
 
