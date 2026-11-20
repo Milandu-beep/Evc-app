@@ -7,7 +7,7 @@ import { randomBytes } from "node:crypto";
 const { default: app } = await import("../src/app.js");
 const { prismaRaw } = await import("../src/config/prisma.js");
 const { domainEvents } = await import("../src/utils/domainEvents.js");
-const { publishDueEvents } = await import("../src/services/events/event.scheduler.js");
+const { publishDueEvents } = await import("../src/services/content/scheduler.js");
 const { computeState } = await import("../src/services/events/event.state.js");
 const { slugify } = await import("../src/utils/slug.js");
 
@@ -145,8 +145,18 @@ await t("état « terminé » : déduit des dates, filtres when=upcoming / past"
   const pa = await api("GET", "/events?when=past&limit=100", null, { auth: false });
   must(!up.b.data.some((e) => e.id === past.id) && pa.b.data.some((e) => e.id === past.id), "filtres when");
   must(pa.b.data.every((e) => e.state === "ENDED") && up.b.data.every((e) => e.state !== "ENDED"), "états incohérents");
-  const noEnd = { status: "PUBLISHED", startsAt: new Date(Date.now() - 4 * H), endsAt: null };
-  must(computeState(noEnd) === "ENDED" && computeState({ ...noEnd, startsAt: new Date(Date.now() - H) }) === "PUBLISHED", "durée par défaut 3 h");
+  // Sans fin : terminé à 23 h 59 (Kinshasa, UTC+1) du jour de début. Début 10 h UTC = 11 h locale.
+  const noEnd = { status: "PUBLISHED", startsAt: new Date("2031-06-10T10:00:00Z"), endsAt: null };
+  const at = (iso) => computeState(noEnd, new Date(iso));
+  must(at("2031-06-10T10:30:00Z") === "PUBLISHED", "pendant l'événement");
+  must(at("2031-06-10T22:30:00Z") === "PUBLISHED", "23 h 30 locale : encore publié (l'ancienne règle de 3 h l'aurait terminé)");
+  must(at("2031-06-10T22:59:59Z") === "PUBLISHED", "23 h 59 locale");
+  must(at("2031-06-10T23:00:00Z") === "ENDED", "minuit local : terminé");
+  must(computeState({ ...noEnd, endsAt: new Date("2031-06-12T10:00:00Z") }, new Date("2031-06-11T10:00:00Z")) === "PUBLISHED", "fin explicite respectée");
+  const dbNoEnd = await mk({ startsAt: iso(-2 * D) }); // pas de fin, commencé il y a 2 jours
+  await api("POST", `${A}/${dbNoEnd.id}/publish`);
+  const pastList = await api("GET", "/events?when=past&limit=100", null, { auth: false });
+  must(pastList.b.data.some((e) => e.id === dbNoEnd.id && e.state === "ENDED"), "sans fin, commencé il y a 2 j : doit être terminé");
   const adminEnded = await api("GET", `${A}?state=ENDED&q=${tag}&limit=100`);
   must(adminEnded.b.data.some((e) => e.id === past.id) && adminEnded.b.data.every((e) => e.state === "ENDED"), "filtre admin ENDED");
 });
@@ -246,6 +256,89 @@ await t("recherche, vedettes, filtres de dates et pagination (meta, tri)", async
   must((await api("GET", `${A}?limit=1000`)).s === 422 && (await api("GET", `${A}?state=FOO`)).s === 422 && (await api("GET", `${A}?sort=title`)).s === 422, "paramètres invalides");
   const inj = await api("GET", `${A}?q=${encodeURIComponent("'; DROP TABLE events;--")}`);
   must(inj.s === 200 && inj.b.data.length === 0, "injection");
+});
+await t("type, capacité, couleur, icône : valeurs par défaut, validation, places restantes", async () => {
+  const e = await mk({});
+  must(e.type === "OTHER" && e.capacity === null && e.registeredCount === 0 && e.color === null && e.icon === null && e.spotsLeft === null && e.isFull === false, "défauts " + JSON.stringify([e.type, e.capacity, e.spotsLeft]));
+  const bad = async (body, label) => must((await api("PATCH", `${A}/${e.id}`, body)).s === 422, label);
+  await bad({ type: "PARTY" }, "type inconnu");
+  await bad({ capacity: 0 }, "capacité 0"); await bad({ capacity: -5 }, "capacité négative"); await bad({ capacity: 1.5 }, "capacité décimale");
+  await bad({ color: "red" }, "couleur nommée"); await bad({ color: "#12345" }, "couleur courte"); await bad({ icon: "Church Icon" }, "icône invalide");
+  for (const type of ["SERVICE", "CONFERENCE", "SEMINAR", "RETREAT", "YOUTH", "PRAYER", "EVANGELISM", "OTHER"]) {
+    must((await api("PATCH", `${A}/${e.id}`, { type })).b.data.type === type, type);
+  }
+  const ok = await api("PATCH", `${A}/${e.id}`, { type: "YOUTH", capacity: 50, color: "#C0FFEE", icon: "music-note", registeredCount: 999 });
+  must(ok.s === 200 && ok.b.data.capacity === 50 && ok.b.data.color === "#c0ffee" && ok.b.data.icon === "music-note", JSON.stringify(ok.b));
+  must(ok.b.data.registeredCount === 0 && ok.b.data.spotsLeft === 50 && ok.b.data.isFull === false, "registeredCount ne doit pas être modifiable par l'API");
+  // Effacer des valeurs : « null » doit être pris en compte (et pas ignoré en silence)
+  const withAll = await api("PATCH", `${A}/${e.id}`, { endsAt: iso(30 * D), coverImageId: imgFile.id, registrationUrl: "https://forms.example.org/x" });
+  must(withAll.s === 200 && withAll.b.data.endsAt && withAll.b.data.coverImage && withAll.b.data.registrationUrl, "renseigner : " + withAll.s);
+  const cleared = await api("PATCH", `${A}/${e.id}`, { endsAt: null, coverImageId: null, registrationUrl: null, color: null, icon: null });
+  const cd = cleared.b.data;
+  must(cleared.s === 200 && cd.endsAt === null && cd.coverImage === null && cd.registrationUrl === null && cd.color === null && cd.icon === null, "effacer fin, image, URL, couleur, icône : " + JSON.stringify([cleared.s, cd?.endsAt, cd?.color, cd?.icon]));
+  await api("PATCH", `${A}/${e.id}`, { color: "#C0FFEE", icon: "music-note" });
+  const full = await prismaRaw.event.update({ where: { id: e.id }, data: { registeredCount: 50 } });
+  must(full.registeredCount === 50, "préparation");
+  const g = await api("GET", `${A}/${e.id}`); must(g.b.data.spotsLeft === 0 && g.b.data.isFull === true, "complet");
+  must((await api("PATCH", `${A}/${e.id}`, { capacity: 40 })).s === 422, "capacité < inscrits");
+  must((await api("PATCH", `${A}/${e.id}`, { capacity: null })).b.data.spotsLeft === null, "illimitée");
+  const unlimited = await api("PATCH", `${A}/${e.id}`, { capacity: 50 }); must(unlimited.s === 200, "50 = inscrits");
+  await prismaRaw.event.update({ where: { id: e.id }, data: { registeredCount: 3 } });
+  await api("POST", `${A}/${e.id}/publish`);
+  const pub = (await api("GET", `/events/${e.translations.fr.slug}`, null, { auth: false })).b.data;
+  must(pub.type === "YOUTH" && pub.color === "#c0ffee" && pub.icon === "music-note" && pub.capacity === 50 && pub.spotsLeft === 47 && pub.isFull === false && !("registeredCount" in pub), "DTO public " + JSON.stringify(pub));
+});
+await t("filtre par type : administration et lecture publique", async () => {
+  const k = `Typ${randomBytes(3).toString("hex")}`;
+  const a = await mk({ type: "PRAYER" }, { fr: { title: `${k} prière`, description: "d" } });
+  const b = await mk({ type: "SEMINAR" }, { fr: { title: `${k} séminaire`, description: "d" } });
+  for (const x of [a, b]) await api("POST", `${A}/${x.id}/publish`);
+  must((await api("GET", `${A}?q=${k}&type=PRAYER`)).b.data.map((e) => e.id).join() === a.id, "admin");
+  must((await api("GET", `/events?q=${k}&type=SEMINAR`, null, { auth: false })).b.data.map((e) => e.id).join() === b.id, "public");
+  must((await api("GET", `/events?type=NOPE`, null, { auth: false })).s === 422, "type invalide");
+});
+await t("identifiant réservé « calendar » : refusé en slug explicite, évité à la génération", async () => {
+  const r = await api("POST", A, { startsAt: iso(D), translations: { fr: { title: "Titre quelconque", description: "d", slug: "calendar" } } });
+  must(r.s === 422, "slug calendar accepté : " + r.s);
+  const g = await mk({}, { fr: { title: "Calendar", description: "d" } });
+  must(g.translations.fr.slug === "calendar-2", "slug généré " + g.translations.fr.slug);
+});
+await t("calendrier : mois local, chevauchement, états visibles, filtres, langue, validations", async () => {
+  const k = `Cal${randomBytes(3).toString("hex")}`;
+  const E = (title, extra, trans) => mk(extra, { fr: { title: `${k} ${title}`, description: "d", ...trans?.fr }, ...trans });
+  const march = await E("mars", { startsAt: "2031-03-10T10:00:00.000Z", type: "SERVICE", color: "#112233", icon: "church" }, { en: { title: `${k} march`, description: "d" } });
+  const overlap = await E("à cheval", { startsAt: "2031-02-27T10:00:00.000Z", endsAt: "2031-03-02T10:00:00.000Z" });
+  const april = await E("avril", { startsAt: "2031-04-05T10:00:00.000Z" });
+  const draft = await E("brouillon", { startsAt: "2031-03-12T10:00:00.000Z" });
+  const cancelled = await E("annulé", { startsAt: "2031-03-14T10:00:00.000Z", type: "PRAYER" });
+  const feb = await E("fin février (23 h 30 locale)", { startsAt: "2031-02-28T22:30:00.000Z" }); // 28/02 23 h 30 à Kinshasa : fait partie de février
+  const mar1 = await E("1er mars 00 h 30 locale", { startsAt: "2031-02-28T23:30:00.000Z" }); // 01/03 00 h 30 à Kinshasa : fait partie de mars
+  for (const x of [march, overlap, april, cancelled, feb, mar1]) await api("POST", `${A}/${x.id}/publish`);
+  await api("POST", `${A}/${cancelled.id}/cancel`);
+  const cal = async (qs, opts) => api("GET", `/events/calendar?${qs}`, null, { auth: false, ...opts });
+  const mine = (r) => r.b.data.items.filter((e) => e.title.includes(k) || e.title.toLowerCase().includes(k.toLowerCase()));
+  const m = await cal("month=2031-03");
+  must(m.s === 200 && m.h.get("cache-control") === "public, max-age=60", m.s + JSON.stringify(m.b).slice(0, 200));
+  const ids = mine(m).map((e) => e.id);
+  must(ids.includes(march.id) && ids.includes(overlap.id) && ids.includes(cancelled.id) && ids.includes(mar1.id), "présents attendus : " + ids.length);
+  must(!ids.includes(april.id) && !ids.includes(draft.id) && !ids.includes(feb.id), "absents attendus (avril, brouillon, 28/02 local)");
+  must(m.b.data.from === "2031-02-28T23:00:00.000Z" && m.b.data.to === "2031-03-31T23:00:00.000Z", `bornes locales ${m.b.data.from} ${m.b.data.to}`);
+  const item = mine(m).find((e) => e.id === march.id);
+  must(item.type === "SERVICE" && item.color === "#112233" && item.icon === "church" && item.end === "2031-03-10T22:59:59.999Z" && item.endsAt === null, "entrée " + JSON.stringify(item));
+  must(!("description" in item) && !("coverImage" in item), "entrée trop lourde");
+  must(mine(m).find((e) => e.id === cancelled.id).state === "CANCELLED", "annulé visible avec son état");
+  must(mine(m).map((e) => +new Date(e.startsAt)).every((v, i, a) => i === 0 || a[i - 1] <= v), "tri par début");
+  must(mine(await cal("month=2031-03&type=PRAYER")).map((e) => e.id).join() === cancelled.id, "filtre type");
+  must(mine(await cal("month=2031-03&lang=en")).find((e) => e.id === march.id).title === `${k} march`, "langue en");
+  const range = await cal(`from=${encodeURIComponent("2031-03-09T00:00:00Z")}&to=${encodeURIComponent("2031-03-11T00:00:00Z")}`);
+  must(mine(range).some((e) => e.id === march.id) && !mine(range).some((e) => e.id === overlap.id), "plage from/to : mars (10/03) oui, l'événement du 27/02 au 02/03 non");
+  const wide = await cal(`from=${encodeURIComponent("2031-03-01T00:00:00Z")}&to=${encodeURIComponent("2031-03-03T00:00:00Z")}`);
+  must(mine(wide).some((e) => e.id === overlap.id) && !mine(wide).some((e) => e.id === march.id), "plage qui touche la fin de l'événement à cheval");
+  must(m.b.data.truncated === false && m.b.data.count === m.b.data.items.length, "méta");
+  for (const [qs, label] of [["", "sans période"], ["month=2031-13", "mois invalide"], ["month=2031-03&from=2031-03-01T00:00:00Z&to=2031-03-05T00:00:00Z", "mois et plage"], ["from=2031-03-05T00:00:00Z", "from seul"], ["from=2031-03-05T00:00:00Z&to=2031-03-01T00:00:00Z", "to avant from"], ["from=2031-01-01T00:00:00Z&to=2033-01-01T00:00:00Z", "plage > 366 j"], ["month=2031-03&lang=de", "langue"]]) {
+    must((await cal(qs)).s === 422, label);
+  }
+  must((await api("GET", "/events/calendar?month=2031-03", null, { auth: false })).s === 200, "route calendar interceptée par :slug");
 });
 await t("audit : création, modification (champs sans contenu), changement de statut, suppression, restauration", async () => {
   const log = (action) => prismaRaw.auditLog.findMany({ where: { entity: "events", action, createdAt: { gte: started } } });

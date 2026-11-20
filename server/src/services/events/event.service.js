@@ -2,78 +2,49 @@ import prisma, { prismaRaw } from "../../config/prisma.js";
 import { DEFAULT_LANGUAGE, HTTP_STATUS } from "../../config/constants.js";
 import AppError from "../../utils/AppError.js";
 import { domainEvents } from "../../utils/domainEvents.js";
-import { slugify } from "../../utils/slug.js";
 import * as auditService from "../audit.service.js";
+import {
+  applyTranslationOps,
+  assertCoverImage,
+  buildCreateRows,
+  diffScalars,
+  invalid,
+  makeSlugTools,
+  mapUniqueViolation,
+  pageMeta,
+  planTranslations,
+} from "../content/common.js";
 import { toAdminDto } from "./event.dto.js";
 import { TRANSITIONS, canTransition, computeState, endOf, stateWhere } from "./event.state.js";
 
 const INCLUDE = { translations: true, coverImage: true };
+const TEXT_FIELDS = ["title", "description", "location"];
+// registeredCount n'y figure volontairement pas : il appartient au futur module d'inscription.
 const SCALAR_FIELDS = [
+  "type",
   "startsAt",
   "endsAt",
   "isFeatured",
   "coverImageId",
+  "capacity",
+  "color",
+  "icon",
   "registrationRequired",
   "registrationUrl",
   "notifyOnPublish",
 ];
 const MIN_SCHEDULE_LEAD_MS = 60 * 1000; // une publication programmée doit être au moins 1 min dans le futur
 
-const invalid = (field, message) =>
-  new AppError("Données invalides", HTTP_STATUS.UNPROCESSABLE, [{ field, message }]);
-
-const sameValue = (a, b) => (a instanceof Date || b instanceof Date ? +new Date(a) === +new Date(b) : a === b);
+// « calendar » est une route (/api/events/calendar) : on ne peut pas l'utiliser comme identifiant d'URL.
+const slugTools = makeSlugTools("eventTranslation", "eventId", { reserved: ["calendar"] });
 
 // ---------------------------------------------------------------------------
 // Aides
 // ---------------------------------------------------------------------------
 
-// Image de couverture : fichier prêt, de type image, non supprimé.
-async function assertCoverImage(id) {
-  if (!id) return;
-  const file = await prisma.storageFile.findUnique({ where: { id } });
-  if (!file || file.status !== "READY" || file.resourceType !== "IMAGE") {
-    throw invalid("coverImageId", "Fichier introuvable, non prêt ou n'étant pas une image");
-  }
-}
-
 function assertDates(startsAt, endsAt) {
   if (endsAt && endsAt < startsAt) throw invalid("endsAt", "La fin ne peut pas précéder le début");
 }
-
-// Slug unique par langue. Les lignes supprimées logiquement comptent (l'unicité les couvre aussi).
-async function uniqueSlug(language, base, excludeEventId = null) {
-  const taken = async (slug) =>
-    !!(await prismaRaw.eventTranslation.findFirst({
-      where: { language, slug, ...(excludeEventId && { NOT: { eventId: excludeEventId } }) },
-      select: { id: true },
-    }));
-  let candidate = base;
-  for (let n = 2; await taken(candidate); n += 1) {
-    candidate = `${base}-${n}`;
-    if (n > 200) throw new AppError("Impossible de générer un identifiant d'URL unique", 500);
-  }
-  return candidate;
-}
-
-async function assertSlugFree(language, slug, excludeEventId = null) {
-  const clash = await prismaRaw.eventTranslation.findFirst({
-    where: { language, slug, ...(excludeEventId && { NOT: { eventId: excludeEventId } }) },
-    select: { id: true },
-  });
-  if (clash) {
-    throw new AppError("Identifiant d'URL déjà utilisé", HTTP_STATUS.CONFLICT, [
-      { field: `translations.${language}.slug`, message: "Déjà utilisé dans cette langue" },
-    ]);
-  }
-}
-
-const mapUniqueViolation = (err) => {
-  if (err?.code === "P2002") {
-    return new AppError("Conflit : identifiant d'URL déjà utilisé", HTTP_STATUS.CONFLICT);
-  }
-  return err;
-};
 
 async function loadActive(id) {
   const event = await prisma.event.findUnique({ where: { id }, include: INCLUDE });
@@ -81,23 +52,15 @@ async function loadActive(id) {
   return event;
 }
 
-// Champs scalaires modifiés : { champ: { from, to } } (pour le journal d'audit).
-function diffScalars(before, after) {
-  const changes = {};
-  for (const key of SCALAR_FIELDS) {
-    if (!sameValue(before[key] ?? null, after[key] ?? null)) changes[key] = { from: before[key] ?? null, to: after[key] ?? null };
-  }
-  return changes;
-}
-
 // ---------------------------------------------------------------------------
 // Lecture (administration)
 // ---------------------------------------------------------------------------
 export async function list(query, now = new Date()) {
-  const { page, limit, q, state, featured, from, to, registrationRequired, deleted, sort, order } = query;
+  const { page, limit, q, state, type, featured, from, to, registrationRequired, deleted, sort, order } = query;
 
   const and = [];
   if (state) and.push(stateWhere(state, now));
+  if (type) and.push({ type });
   if (featured !== undefined) and.push({ isFeatured: featured });
   if (registrationRequired !== undefined) and.push({ registrationRequired });
   if (from) and.push({ startsAt: { gte: from } });
@@ -124,7 +87,7 @@ export async function list(query, now = new Date()) {
       take: limit,
     }),
   ]);
-  return { items: rows.map((e) => toAdminDto(e, now)), meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  return { items: rows.map((e) => toAdminDto(e, now)), meta: pageMeta(page, limit, total) };
 }
 
 export async function getById(id, { includeDeleted = false } = {}) {
@@ -142,26 +105,20 @@ export async function create(input, req) {
   const { translations, ...fields } = input;
   assertDates(fields.startsAt, fields.endsAt ?? null);
   await assertCoverImage(fields.coverImageId);
-
-  const rows = [];
-  for (const [language, t] of Object.entries(translations)) {
-    if (!t) continue;
-    const slug = t.slug ?? (await uniqueSlug(language, slugify(t.title)));
-    if (t.slug) await assertSlugFree(language, slug);
-    rows.push({ language, slug, title: t.title, description: t.description, location: t.location ?? null });
-  }
-  if (!rows.some((r) => r.language === DEFAULT_LANGUAGE)) {
-    throw invalid(`translations.${DEFAULT_LANGUAGE}`, "La traduction française est obligatoire");
-  }
+  const rows = await buildCreateRows(translations, { textFields: TEXT_FIELDS, slugTools });
 
   let event;
   try {
     event = await prismaRaw.event.create({
       data: {
+        type: fields.type ?? "OTHER",
         startsAt: fields.startsAt,
         endsAt: fields.endsAt ?? null,
         isFeatured: fields.isFeatured ?? false,
         coverImageId: fields.coverImageId ?? null,
+        capacity: fields.capacity ?? null,
+        color: fields.color ?? null,
+        icon: fields.icon ?? null,
         registrationRequired: fields.registrationRequired ?? false,
         registrationUrl: fields.registrationUrl ?? null,
         notifyOnPublish: fields.notifyOnPublish ?? false,
@@ -178,7 +135,7 @@ export async function create(input, req) {
     action: "CREATE",
     entity: "events",
     entityId: event.id,
-    changes: { status: event.status, languages: rows.map((r) => r.language), startsAt: event.startsAt },
+    changes: { status: event.status, type: event.type, languages: rows.map((r) => r.language), startsAt: event.startsAt },
     req,
   });
   return toAdminDto(event);
@@ -197,54 +154,26 @@ export async function update(id, input, req) {
   const next = { ...current, ...fields };
   assertDates(next.startsAt, next.endsAt);
   if ("coverImageId" in fields && fields.coverImageId !== current.coverImageId) await assertCoverImage(fields.coverImageId);
-
-  const scalarChanges = diffScalars(current, next);
-  const existingByLang = Object.fromEntries(current.translations.map((t) => [t.language, t]));
-  const ops = []; // opérations sur les traductions
-  const translationChanges = {};
-
-  for (const [language, t] of Object.entries(translations)) {
-    const existing = existingByLang[language];
-    if (t === null) {
-      if (language === DEFAULT_LANGUAGE) throw invalid(`translations.${language}`, "La traduction française ne peut pas être supprimée");
-      if (existing) {
-        ops.push({ kind: "delete", id: existing.id });
-        translationChanges[language] = "deleted";
-      }
-      continue;
-    }
-    if (!existing) {
-      if (!t.title || !t.description) throw invalid(`translations.${language}`, "title et description sont requis pour créer une traduction");
-      const slug = t.slug ?? (await uniqueSlug(language, slugify(t.title)));
-      if (t.slug) await assertSlugFree(language, slug, id);
-      ops.push({ kind: "create", data: { language, slug, title: t.title, description: t.description, location: t.location ?? null } });
-      translationChanges[language] = "created";
-      continue;
-    }
-    const data = {};
-    for (const key of ["title", "description", "location"]) {
-      if (key in t && (t[key] ?? null) !== (existing[key] ?? null)) data[key] = t[key] ?? null;
-    }
-    if (t.slug && t.slug !== existing.slug) {
-      await assertSlugFree(language, t.slug, id);
-      data.slug = t.slug;
-    }
-    if (Object.keys(data).length) {
-      ops.push({ kind: "update", id: existing.id, data });
-      translationChanges[language] = { updated: Object.keys(data) }; // noms des champs, jamais le contenu
-    }
+  if (next.capacity != null && next.capacity < current.registeredCount) {
+    throw invalid("capacity", `La capacité ne peut pas être inférieure au nombre d'inscrits (${current.registeredCount})`);
   }
+
+  const scalarChanges = diffScalars(current, next, SCALAR_FIELDS);
+  const { ops, changes: translationChanges } = await planTranslations({
+    existingByLang: Object.fromEntries(current.translations.map((t) => [t.language, t])),
+    translations,
+    textFields: TEXT_FIELDS,
+    requiredOnCreate: ["title", "description"],
+    slugTools,
+    parentId: id,
+  });
 
   if (!Object.keys(scalarChanges).length && !ops.length) return toAdminDto(current); // rien à faire
 
   let updated;
   try {
     updated = await prismaRaw.$transaction(async (tx) => {
-      for (const op of ops) {
-        if (op.kind === "delete") await tx.eventTranslation.delete({ where: { id: op.id } });
-        else if (op.kind === "update") await tx.eventTranslation.update({ where: { id: op.id }, data: op.data });
-        else await tx.eventTranslation.create({ data: { ...op.data, eventId: id } });
-      }
+      await applyTranslationOps(tx.eventTranslation, ops, "eventId", id);
       return tx.event.update({
         where: { id },
         data: Object.fromEntries(SCALAR_FIELDS.filter((k) => k in fields).map((k) => [k, fields[k] ?? null])),

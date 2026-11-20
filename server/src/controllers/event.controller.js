@@ -3,10 +3,16 @@ import * as eventService from "../services/events/event.service.js";
 import * as publicService from "../services/events/event.public.service.js";
 import { sendCreated, sendPaginated, sendSuccess } from "../utils/response.js";
 
+// express-validator écarte de matchedData les champs scalaires « optional({ nullable: true }) » reçus à null :
+// sans ce rattrapage, « { "capacity": null } » (effacer une valeur) serait silencieusement ignoré.
+// Ces clés ont déjà été validées (null accepté) ; on les relit dans le corps de la requête.
+const NULLABLE_FIELDS = ["endsAt", "coverImageId", "capacity", "color", "icon", "registrationUrl"];
+
 // Corps validé, sans traductions « fantômes » : une langue absente ou vide est ignorée,
 // « null » (suppression explicite d'une langue) est conservé.
 function data(req) {
   const body = matchedData(req, { locations: ["body"] });
+  for (const key of NULLABLE_FIELDS) if (req.body?.[key] === null) body[key] = null;
   if (body.translations) {
     const cleaned = {};
     for (const [lang, value] of Object.entries(body.translations)) {
@@ -32,6 +38,7 @@ export const adminList = async (req, res) => {
     limit: q.limit ?? 20,
     q: q.q,
     state: q.state,
+    type: q.type,
     featured: q.featured,
     from: q.from,
     to: q.to,
@@ -73,6 +80,7 @@ export const publicList = async (req, res) => {
   const { items, meta } = await publicService.list({
     lang: publicService.resolveLanguage(req),
     q: q.q,
+    type: q.type,
     when: q.when ?? "upcoming",
     featured: q.featured,
     page: q.page ?? 1,
@@ -86,4 +94,18 @@ export const publicDetail = async (req, res) => {
   const event = await publicService.getBySlug(req.params.slug, publicService.resolveLanguage(req));
   cache(res);
   sendSuccess(res, event);
+};
+
+// GET /api/events/calendar?month=2026-12  ou  ?from=…&to=…  (+ lang, type)
+export const publicCalendar = async (req, res) => {
+  const q = params(req);
+  const data = await publicService.calendar({
+    lang: publicService.resolveLanguage(req),
+    type: q.type,
+    month: q.month,
+    from: q.from,
+    to: q.to,
+  });
+  cache(res);
+  sendSuccess(res, data);
 };

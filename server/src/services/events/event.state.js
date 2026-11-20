@@ -1,13 +1,13 @@
 // Règles d'état des événements : calcul de l'état affiché, filtres de lecture, transitions.
 // Fonctions pures (sans base de données) : testables isolément.
+import env from "../../config/env.js";
+import { endOfLocalDay, startOfLocalDay } from "../../utils/timezone.js";
 
-// Sans date de fin, un événement est considéré terminé 3 h après son début.
-export const DEFAULT_DURATION_MS = 3 * 60 * 60 * 1000;
 
 export const EVENT_STATES = ["DRAFT", "SCHEDULED", "PUBLISHED", "ENDED", "CANCELLED", "ARCHIVED"];
 
-export const endOf = (event) =>
-  event.endsAt ?? new Date(event.startsAt.getTime() + DEFAULT_DURATION_MS);
+// Sans date de fin, un événement se termine à 23 h 59 (heure de l'église) du jour de son début.
+export const endOf = (event) => event.endsAt ?? endOfLocalDay(event.startsAt, env.timeZone);
 
 export const hasEnded = (event, now = new Date()) => endOf(event) < now;
 
@@ -29,11 +29,13 @@ export function computeState(event, now = new Date()) {
 // ---------------------------------------------------------------------------
 // Filtres Prisma équivalents (même logique que computeState, exprimée en base)
 // ---------------------------------------------------------------------------
+// Sans fin renseignée : terminé quand le jour local de début est passé, c'est-à-dire startsAt avant
+// le début du jour local courant. (Équivalent en base de endOfLocalDay(startsAt) < now.)
 const endedWhere = (now) => ({
-  OR: [{ endsAt: { lt: now } }, { endsAt: null, startsAt: { lt: new Date(now.getTime() - DEFAULT_DURATION_MS) } }],
+  OR: [{ endsAt: { lt: now } }, { endsAt: null, startsAt: { lt: startOfLocalDay(now, env.timeZone) } }],
 });
 const notEndedWhere = (now) => ({
-  OR: [{ endsAt: { gte: now } }, { endsAt: null, startsAt: { gte: new Date(now.getTime() - DEFAULT_DURATION_MS) } }],
+  OR: [{ endsAt: { gte: now } }, { endsAt: null, startsAt: { gte: startOfLocalDay(now, env.timeZone) } }],
 });
 // Visible publiquement : publié, programmé et échu, ou annulé après avoir été publié.
 const publiclyVisibleWhere = (now) => ({

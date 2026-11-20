@@ -10,7 +10,8 @@
     "storage:cleanup": "node scripts/storage-cleanup.js",
     "test:storage": "node tests/storage.stub.test.mjs",
     "test:storage:cloudinary": "node tests/storage.cloudinary.test.mjs",
-    "test:events": "node tests/events.test.mjs"
+    "test:events": "node tests/events.test.mjs",
+    "test:news": "node tests/news.test.mjs"
   },
   "keywords": [],
   "author": "",

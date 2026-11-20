@@ -116,7 +116,7 @@ Statut stocké : `DRAFT` (brouillon), `SCHEDULED` (programmé), `PUBLISHED` (pub
 |---|---|
 | `DRAFT` · `SCHEDULED` · `CANCELLED` · `ARCHIVED` | Identique au statut |
 | `PUBLISHED` | Publié (ou programmé dont l'heure est venue) et pas encore terminé |
-| `ENDED` | Terminé : publié et `endsAt` dépassé. Sans `endsAt`, terminé 3 h après `startsAt`. Jamais stocké |
+| `ENDED` | Terminé : publié et `endsAt` dépassé. **Sans `endsAt`, terminé à 23 h 59 (heure de Kinshasa, `APP_TIMEZONE`) du jour de début.** Jamais stocké |
 
 Un événement **annulé** reste visible publiquement avec l'état `CANCELLED` (les fidèles doivent le savoir).
 
@@ -153,11 +153,25 @@ OneSignal »). Elle est atomique : en cas de plusieurs instances, chaque événe
 | POST | `/admin/events/:id/restore` | Restauration depuis la corbeille (un programmé revient en brouillon) |
 | POST | `/admin/events/:id/{publish,schedule,unpublish,cancel,archive,unarchive}` | Transitions |
 
+**Champs d'un événement** (en plus des dates et traductions) :
+
+| Champ | Description |
+|---|---|
+| `type` | `SERVICE`, `CONFERENCE`, `SEMINAR`, `RETREAT`, `YOUTH`, `PRAYER`, `EVANGELISM`, `OTHER` (défaut) |
+| `capacity` | Nombre de places (≥ 1), `null` = illimitée. Ne peut pas être inférieure au nombre d'inscrits |
+| `registeredCount` | Nombre d'inscrits, **lecture seule** : tenu à jour par le futur module d'inscription. Les réponses donnent aussi `spotsLeft` (`null` si illimitée) et `isFull` |
+| `color` | Couleur `#RRGGBB` (enregistrée en minuscules), pour le calendrier |
+| `icon` | Nom d'icône en minuscules et tirets (ex. `church`, `music-note`), pour le calendrier |
+
 **Création** (`POST /admin/events`) :
 ```json
 {
   "startsAt": "2026-12-24T17:30:00Z",
   "endsAt": "2026-12-24T20:00:00Z",
+  "type": "SERVICE",
+  "capacity": 200,
+  "color": "#d4a017",
+  "icon": "church",
   "isFeatured": true,
   "coverImageId": "<uuid d'un fichier storage_files prêt, de type image>",
   "registrationRequired": true,
@@ -188,6 +202,7 @@ passent par les actions ci-dessus, jamais par `PATCH`.
 | `page`, `limit` | défaut 1 et 20 ; `limit` ≤ 100 |
 | `q` | recherche (insensible à la casse) dans titre, description, lieu et slug, toutes langues |
 | `state` | `DRAFT`, `SCHEDULED`, `PUBLISHED`, `ENDED`, `CANCELLED`, `ARCHIVED` |
+| `type` | un des types ci-dessus |
 | `featured`, `registrationRequired` | `true` / `false` |
 | `from`, `to` | bornes sur `startsAt` (ISO 8601) |
 | `deleted` | `true` : corbeille uniquement |
@@ -200,9 +215,10 @@ Réponse : `{ "success": true, "data": [...], "meta": { "page", "limit", "total"
 | Méthode | Route | Description |
 |---|---|---|
 | GET | `/events` | Événements publiés (et annulés après publication) |
-| GET | `/events/:slug` | Détail par identifiant d'URL |
+| GET | `/events/calendar` | Événements d'une période, format calendrier |
+| GET | `/events/:slug` | Détail par identifiant d'URL (`calendar` est un identifiant réservé) |
 
-Paramètres de `/events` : `lang` (`fr`/`en`), `when` (`upcoming` par défaut, `past`, `all`), `q`, `featured`, `page`,
+Paramètres de `/events` : `type`, `lang` (`fr`/`en`), `when` (`upcoming` par défaut, `past`, `all`), `q`, `featured`, `page`,
 `limit` (défaut 12, ≤ 100). Tri : à venir du plus proche au plus lointain ; passés du plus récent au plus ancien.
 
 - **Langue** : `?lang=` sinon en-tête `Accept-Language`, sinon français. Sans traduction dans la langue demandée,
@@ -213,6 +229,18 @@ Paramètres de `/events` : `lang` (`fr`/`en`), `when` (`upcoming` par défaut, `
   `isFeatured`, `registrationRequired`, `registrationUrl`, `coverImage`, `alternates`. Aucun champ interne
   (statut, `publishAt`, auteur, `notifyOnPublish`, dates de gestion).
 - En-tête `Cache-Control: public, max-age=60`. Limite : 1000 requêtes par 15 minutes et par IP.
+
+### Calendrier (`GET /events/calendar`)
+
+Pour afficher une grille mensuelle. Une période obligatoire, au choix :
+- `month=2026-12` : le mois **local** de l'église (du 1er 00 h au 1er suivant 00 h, heure de Kinshasa) ;
+- `from=…&to=…` (ISO 8601, `to` exclu, 366 jours maximum).
+
+Autres paramètres : `type`, `lang`. Réponse : `{ from, to, count, truncated, items }` (500 entrées au plus ;
+`truncated: true` si la période en contient davantage). Chaque entrée est légère : `id`, `slug`, `title`, `location`,
+`state`, `type`, `color`, `icon`, `startsAt`, `endsAt`, **`end`** (fin effective : `endsAt`, ou 23 h 59 locale du jour de
+début), `isFeatured`, `registrationRequired`, `isFull`. Sont inclus les événements qui **chevauchent** la période (un
+événement du 27 février au 2 mars apparaît en mars), publiés ou annulés ; jamais les brouillons. Cache : 60 s.
 
 ### Préparation OneSignal
 
@@ -226,3 +254,68 @@ Le module n'envoie aucune notification (Sprint dédié). Il émet sur un bus int
 `CREATE`, `UPDATE` (champs modifiés avec ancienne et nouvelle valeur ; pour les textes, **uniquement les noms des champs**,
 jamais leur contenu), `STATUS_CHANGE` (`action`, `from`, `to`, `publishAt`, `reason`), `DELETE`, `RESTORE`.
 Les bascules automatiques de la publication programmée sont écrites sans administrateur (`adminId` vide, `reason: "scheduled"`).
+
+## Actualités
+
+Même fonctionnement que les événements (traductions FR/EN, image de couverture, publication programmée, audit,
+recherche, pagination, lecture publique localisée), sans annulation ni état « terminé ».
+
+### États et transitions
+
+Statuts : `DRAFT`, `SCHEDULED`, `PUBLISHED`, `ARCHIVED` (`state` : identique ; une actualité programmée dont l'heure est
+venue est `PUBLISHED`).
+
+| Action (POST `/admin/news/:id/<action>`) | Depuis | Vers | Corps |
+|---|---|---|---|
+| `publish` | DRAFT, SCHEDULED | PUBLISHED | — |
+| `schedule` | DRAFT, SCHEDULED | SCHEDULED | `{ "publishAt": "…" }` (≥ 1 min dans le futur) |
+| `unpublish` | PUBLISHED, SCHEDULED | DRAFT | — |
+| `archive` | DRAFT, SCHEDULED, PUBLISHED | ARCHIVED | — |
+| `unarchive` | ARCHIVED | DRAFT | — |
+
+Transition impossible : 409. Publier exige titre et contenu en français. Mêmes règles que les événements pour la
+publication programmée (visible à l'heure dite, tâche de fond atomique), la suppression (interdite si publiée : dépublier
+ou archiver d'abord), la corbeille et la restauration (une actualité programmée revient en brouillon).
+
+### Administration
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET | `/admin/news` | Liste filtrée et paginée |
+| POST | `/admin/news` | Création (brouillon) |
+| GET | `/admin/news/:id` | Détail complet, toutes langues |
+| PATCH | `/admin/news/:id` | Modification partielle (`translations.en: null` supprime l'anglais) |
+| DELETE | `/admin/news/:id` | Suppression logique (DRAFT, SCHEDULED ou ARCHIVED) |
+| POST | `/admin/news/:id/restore` | Restauration |
+| POST | `/admin/news/:id/{publish,schedule,unpublish,archive,unarchive}` | Transitions |
+
+**Création** :
+```json
+{
+  "isFeatured": false,
+  "coverImageId": "<uuid d'un fichier image prêt>",
+  "notifyOnPublish": true,
+  "translations": {
+    "fr": { "title": "Nouvelle église à Kinshasa", "excerpt": "Résumé facultatif.", "content": "Texte complet…" },
+    "en": { "title": "New church in Kinshasa", "content": "Full text…" }
+  }
+}
+```
+`title` 3–200 caractères, `excerpt` ≤ 500 (facultatif), `content` 1–50 000 (texte brut : le frontend doit l'échapper).
+Le slug se génère et se conserve comme pour les événements. **Liste** : `page`, `limit`, `q` (titre, extrait, contenu, slug),
+`state`, `featured`, `from`/`to` (date de création), `deleted`, `sort` (`createdAt`, `updatedAt`, `publishedAt`), `order`.
+
+### Lecture publique
+
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/news` | Actualités publiées, les plus récentes d'abord |
+| GET | `/news/:slug` | Détail par identifiant d'URL, texte complet |
+
+Paramètres de `/news` : `lang`, `q`, `featured`, `from`/`to` (date de publication), `page`, `limit` (défaut 12).
+La liste renvoie `excerpt` (celui de l'administrateur, sinon le début du contenu coupé à un mot, 200 caractères au plus) et
+**pas** le `content`. Réponse : `id`, `slug`, `language`, `title`, `excerpt`, `publishedAt`, `isFeatured`, `coverImage`,
+`alternates` (+ `content` en détail). Mêmes règles de langue, de cache et de limitation que les événements.
+
+Événement interne émis : `news.published` `{ newsId, notifyOnPublish, reason: "manual" | "scheduled", adminId? }`.
+Audit : `CREATE`, `UPDATE` (noms de champs, jamais les textes), `STATUS_CHANGE`, `DELETE`, `RESTORE` (entité `news`).

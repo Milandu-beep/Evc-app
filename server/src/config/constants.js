@@ -22,5 +22,17 @@ export const ROLES = Object.freeze({
 export const LANGUAGES = Object.freeze({ FR: "fr", EN: "en" });
 export const DEFAULT_LANGUAGE = LANGUAGES.FR;
 
+// Types d'événements (enum EventType du schéma Prisma).
+export const EVENT_TYPES = Object.freeze([
+  "SERVICE",
+  "CONFERENCE",
+  "SEMINAR",
+  "RETREAT",
+  "YOUTH",
+  "PRAYER",
+  "EVANGELISM",
+  "OTHER",
+]);
+
 export const API_PREFIX = "/api";
 export const API_VERSION = "1.0.0";

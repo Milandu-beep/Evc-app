@@ -2,7 +2,7 @@ import env from "./config/env.js";
 import app from "./app.js";
 import prisma from "./config/prisma.js";
 import logger from "./utils/logger.js";
-import { startEventScheduler, stopEventScheduler } from "./services/events/event.scheduler.js";
+import { startScheduler, stopScheduler } from "./services/content/scheduler.js";
 
 async function start() {
   try {
@@ -13,12 +13,12 @@ async function start() {
       logger.info(`EVC API démarrée sur http://localhost:${env.port} (${env.nodeEnv})`)
     );
 
-    // Publication programmée des événements (désactivable : SCHEDULER_ENABLED=false)
-    if (process.env.SCHEDULER_ENABLED !== "false") startEventScheduler();
+    // Publication programmée des événements et actualités (désactivable : SCHEDULER_ENABLED=false)
+    if (process.env.SCHEDULER_ENABLED !== "false") startScheduler();
 
     const shutdown = (signal) => {
       logger.info(`${signal} reçu, arrêt en cours...`);
-      stopEventScheduler();
+      stopScheduler();
       server.close(async () => {
         await prisma.$disconnect();
         process.exit(0);

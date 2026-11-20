@@ -25,8 +25,8 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 | Table | Rôle | Traductions |
 |---|---|---|
 | `admins` | Comptes Super Admin / Admin | — |
-| `events` | Événements : statut (`EventStatus`), dates, publication programmée (`publishAt`), `publishedAt`, `cancelledAt`, image de couverture, vedette, inscription (`registrationRequired`, `registrationUrl`), `notifyOnPublish` | `event_translations` : slug, titre, description, lieu |
-| `news` | Actualités | `news_translations` : slug, titre, extrait, contenu |
+| `events` | Événements : type (`EventType`), capacité, inscrits (`registeredCount`), couleur, icône, statut (`EventStatus`), dates, publication programmée (`publishAt`), `publishedAt`, `cancelledAt`, image de couverture, vedette, inscription (`registrationRequired`, `registrationUrl`), `notifyOnPublish` | `event_translations` : slug, titre, description, lieu |
+| `news` | Actualités : statut (`NewsStatus` : brouillon, programmé, publié, archivé), `publishAt`, `publishedAt`, vedette, `notifyOnPublish`, image de couverture | `news_translations` : slug, titre, extrait, contenu |
 | `daily_messages` | Message quotidien (une ligne par jour, `date` unique) | `daily_message_translations` : titre, contenu, référence biblique |
 | `notifications` | Notifications OneSignal (statut, planification, lien facultatif vers événement / actualité / message) | `notification_translations` : titre, message |
 | `media` | Médiathèque : `IMAGE`, `PDF`, `AUDIO`, `YOUTUBE` | `media_translations` : titre, description |
@@ -72,6 +72,8 @@ chaque parent 1─n sa table de traductions                                     
 - Index uniques partiels : `storage_files(provider, resourceType, checksum)` (dédoublonnage, envois `UPLOADING` ou `READY` non supprimés) et
   `media_folders(parent, nom)` (parmi les dossiers actifs).
 - `CHECK` sur `events` : `endsAt >= startsAt` ; `SCHEDULED` exige `publishAt` ; `registrationUrl` en `http(s)://`.
+- `CHECK` sur `events` : `capacity > 0` ; `registeredCount >= 0` et `<= capacity` ; `color` en `#rrggbb` ; `icon` en minuscules et tirets.
+- `CHECK` sur `news` : `SCHEDULED` exige `publishAt` ; sur `news_translations.slug` : minuscules, chiffres et tirets.
 - `CHECK` sur `event_translations.slug` : minuscules, chiffres et tirets.
 - `CHECK` sur `service_schedules` : heures au format `HH:mm` valide.
 - Index de lecture incluant `deletedAt` ; `audit_logs` indexé par `(entity, entityId)`, `(adminId, createdAt)`, `createdAt`.
@@ -83,6 +85,7 @@ chaque parent 1─n sa table de traductions                                     
 | `20261120091524_init_admins` | Table `admins`, enum `Role` |
 | `20261120092905_data_model` | 15 tables, enums, index, contraintes `CHECK`, RLS |
 | `20261120100000_db_hardening` | UUID, `deletedAt`, enum `Weekday`, table `audit_logs`, index partiel de la date des messages, RLS |
+| `20261120140000_event_extras_and_news` | Événements : `EventType`, `capacity`, `registeredCount`, `color`, `icon` (contraintes `CHECK`) ; actualités : enum `NewsStatus`, `publishAt`, vedette, `notifyOnPublish`, index et contraintes (programmation, slug) |
 | `20261120130000_events_lifecycle` | Enum `EventStatus` (`DRAFT`, `SCHEDULED`, `PUBLISHED`, `CANCELLED`, `ARCHIVED` ; « terminé » est déduit), colonnes de publication, d'annulation, d'inscription et `notifyOnPublish`, index `(status, publishAt)`, contraintes `CHECK` (dates, programmation, URL, slug) |
 | `20261120120000_storage_file_status` | Statut des fichiers (`StorageFileStatus`), `url` / `secureUrl` facultatives, unicité de l'empreinte limitée aux envois en cours ou terminés |
 | `20261120110000_storage_files` | `storage_files`, `media_folders`, clés étrangères vers les fichiers (retrait de `coverImage` texte et des colonnes de fichier de `media`), enums `StorageProvider`, `StorageResourceType`, `MediaType.VIDEO`, actions d'audit de fichier, index partiels (empreinte, nom de dossier), RLS |

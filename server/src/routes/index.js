@@ -4,6 +4,8 @@ import authRoutes from "./auth.routes.js";
 import storageRoutes from "./storage.routes.js";
 import eventsRoutes from "./events.routes.js";
 import adminEventsRoutes from "./admin.events.routes.js";
+import newsRoutes from "./news.routes.js";
+import adminNewsRoutes from "./admin.news.routes.js";
 import { sendSuccess } from "../utils/response.js";
 import { API_VERSION } from "../config/constants.js";
 
@@ -18,6 +20,8 @@ router.use("/auth", authRoutes);
 router.use("/storage", storageRoutes);
 router.use("/events", eventsRoutes);
 router.use("/admin/events", adminEventsRoutes);
+router.use("/news", newsRoutes);
+router.use("/admin/news", adminNewsRoutes);
 
 // Les routes métier seront montées ici, sprint par sprint.
 

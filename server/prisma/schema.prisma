@@ -66,6 +66,26 @@ enum EventStatus {
   ARCHIVED
 }
 
+// Nature d'un événement (filtre, couleur et icône par défaut côté frontend)
+enum EventType {
+  SERVICE
+  CONFERENCE
+  SEMINAR
+  RETREAT
+  YOUTH
+  PRAYER
+  EVANGELISM
+  OTHER
+}
+
+// Cycle de vie d'une actualité (même logique que les événements, sans annulation ni « terminé »)
+enum NewsStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
 // Fournisseur de stockage des fichiers (voir docs/STORAGE_ARCHITECTURE.md)
 enum StorageProvider {
   CLOUDINARY
@@ -152,6 +172,10 @@ model Admin {
 
 model Event {
   id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type                 EventType   @default(OTHER)
+  // Présentation (calendrier) : couleur #RRGGBB et nom d'icône, facultatifs
+  color                String?
+  icon                 String?
   status               EventStatus @default(DRAFT)
   coverImageId         String?     @db.Uuid
   startsAt             DateTime
@@ -164,6 +188,10 @@ model Event {
   // Inscription (événements futurs nécessitant une inscription)
   registrationRequired Boolean     @default(false)
   registrationUrl      String?
+  // Capacité : null = illimitée. registeredCount est tenu à jour par le futur module d'inscription
+  // (jamais modifiable par l'API d'administration des événements).
+  capacity             Int?
+  registeredCount      Int         @default(0)
   // Préparation OneSignal (Sprint notifications) : demande d'une notification à la publication
   notifyOnPublish      Boolean     @default(false)
   createdById          String?     @db.Uuid
@@ -179,6 +207,7 @@ model Event {
   @@index([status, startsAt, deletedAt])
   @@index([status, publishAt])
   @@index([isFeatured])
+  @@index([type])
   @@index([createdById])
   @@index([coverImageId])
   @@map("events")
@@ -205,14 +234,19 @@ model EventTranslation {
 // ----------------------------------------------------------------------------
 
 model News {
-  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status       PublishStatus @default(DRAFT)
-  coverImageId String?       @db.Uuid
-  publishedAt  DateTime? // renseignée à la publication
-  createdById  String?       @db.Uuid
-  createdAt    DateTime      @default(now())
-  deletedAt    DateTime?
-  updatedAt    DateTime      @updatedAt
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status          NewsStatus @default(DRAFT)
+  coverImageId    String?    @db.Uuid
+  publishedAt     DateTime? // renseignée à la publication
+  // Publication programmée : visible publiquement à partir de publishAt (statut SCHEDULED)
+  publishAt       DateTime?
+  isFeatured      Boolean    @default(false)
+  // Préparation OneSignal : demande d'une notification à la publication
+  notifyOnPublish Boolean    @default(false)
+  createdById     String?    @db.Uuid
+  createdAt       DateTime   @default(now())
+  deletedAt       DateTime?
+  updatedAt       DateTime   @updatedAt
 
   coverImage    StorageFile?      @relation(fields: [coverImageId], references: [id], onDelete: SetNull)
   createdBy     Admin?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -220,6 +254,8 @@ model News {
   notifications Notification[]
 
   @@index([status, publishedAt, deletedAt])
+  @@index([status, publishAt])
+  @@index([isFeatured])
   @@index([createdById])
   @@index([coverImageId])
   @@map("news")

@@ -1,7 +1,7 @@
 # EVC APP - PROJECT CHARTER
-Version : 1.5
+Version : 1.6
 Statut : Validé
-Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible ; 1.3 (2026-11-20) — vidéos hébergées (MP4/WebM) via Cloudinary en plus des liens YouTube ; 1.4 (2026-11-20) — Cloudinary pour tous les fichiers (images, vidéos, PDF, audio), Supabase Storage abandonné ; 1.5 (2026-11-20) — roadmap : Événements en Sprint 4, authentification avancée en Sprint 5
+Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible ; 1.3 (2026-11-20) — vidéos hébergées (MP4/WebM) via Cloudinary en plus des liens YouTube ; 1.4 (2026-11-20) — Cloudinary pour tous les fichiers (images, vidéos, PDF, audio), Supabase Storage abandonné ; 1.5 (2026-11-20) — roadmap : Événements en Sprint 4, authentification avancée en Sprint 5 ; 1.6 (2026-11-20) — roadmap en 15 étapes (Actualités, Messages du jour, Galerie, Prédications avant les notifications et le tableau de bord)
 Projet : Plateforme officielle de l'Église Vie Céleste (EVC)
 
 ---
@@ -288,33 +288,23 @@ Supabase
 
 # 16. Roadmap
 
-Sprint 1 — Fondation (backend, authentification, base de données) ✅
+1. Fondation et authentification ✅
+2. Base de données ✅
+3. Stockage (StorageService, Cloudinary) ✅
+4. Événements ✅
+5. Actualités
+6. Messages du jour
+7. Galerie
+8. Prédications
+9. Notifications OneSignal
+10. Tableau de bord
+11. Authentification avancée (refresh tokens, permissions fines)
+12. Frontend administrateur
+13. Site public
+14. PWA
+15. Déploiement (Vercel, Railway ou VPS, Supabase, Cloudinary)
 
-Sprint 2 — Modèle de données ✅
-
-Sprint 2.5 — Durcissement de la base (UUID, suppression logique, audit) ✅
-
-Sprint 3 — Stockage (StorageService, Cloudinary) ✅
-
-Sprint 4 — Événements (cycle de vie, traductions, publication programmée, images, audit)
-
-Sprint 5 — Authentification avancée (permissions, rafraîchissement des tokens)
-
-Sprint 6 — Actualités
-
-Sprint 7 — Messages quotidiens
-
-Sprint 8 — Médiathèque
-
-Sprint 9 — Notifications (OneSignal)
-
-Sprint 10 — Dashboard
-
-Sprint 11 — Site public
-
-Sprint 12 — PWA
-
-Déploiement : fin du Sprint 12 (Vercel, Railway ou VPS, Supabase (base de données), Cloudinary).
+La médiathèque de la première version est répartie entre la Galerie (7) et les Prédications (8).
 
 ---
 

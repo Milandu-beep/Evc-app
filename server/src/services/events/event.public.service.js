@@ -1,7 +1,10 @@
 import { prismaRaw } from "../../config/prisma.js";
 import { DEFAULT_LANGUAGE, HTTP_STATUS, LANGUAGES } from "../../config/constants.js";
 import AppError from "../../utils/AppError.js";
-import { toPublicDto } from "./event.dto.js";
+import env from "../../config/env.js";
+import { startOfLocalDay, startOfLocalMonth } from "../../utils/timezone.js";
+import { pageMeta } from "../content/common.js";
+import { toCalendarDto, toPublicDto } from "./event.dto.js";
 import { endedWhere, notEndedWhere, publicVisibility } from "./event.state.js";
 
 const INCLUDE = { translations: true, coverImage: true };
@@ -20,8 +23,9 @@ export function resolveLanguage(req) {
 }
 
 // Liste publique : événements publiés (ou programmés et échus) et annulés après publication.
-export async function list({ lang, q, when, featured, page, limit }, now = new Date()) {
+export async function list({ lang, q, type, when, featured, page, limit }, now = new Date()) {
   const and = [publicVisibility(now)];
+  if (type) and.push({ type });
   if (when === "upcoming") and.push(notEndedWhere(now));
   if (when === "past") and.push(endedWhere(now));
   if (featured !== undefined) and.push({ isFeatured: featured });
@@ -47,7 +51,7 @@ export async function list({ lang, q, when, featured, page, limit }, now = new D
   ]);
   return {
     items: rows.map((e) => toPublicDto(e, lang, now)),
-    meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    meta: pageMeta(page, limit, total),
   };
 }
 
@@ -59,4 +63,40 @@ export async function getBySlug(slug, lang, now = new Date()) {
   });
   if (!translation) throw new AppError("Événement introuvable", HTTP_STATUS.NOT_FOUND);
   return toPublicDto(translation.event, lang, now);
+}
+
+// ---------------------------------------------------------------------------
+// Calendrier : événements visibles qui chevauchent la période [from, to[
+// ---------------------------------------------------------------------------
+export const CALENDAR_LIMIT = 500;
+
+// Période demandée : un mois (« AAAA-MM », mois local de l'église) ou une plage from/to.
+export function calendarRange({ month, from, to }) {
+  if (month) {
+    const [y, m] = month.split("-").map(Number);
+    return { from: startOfLocalMonth(y, m, env.timeZone), to: startOfLocalMonth(y, m, env.timeZone, 1) };
+  }
+  return { from, to };
+}
+
+export async function calendar({ lang, type, month, from, to }, now = new Date()) {
+  const range = calendarRange({ month, from, to });
+  // Chevauchement : commence avant la fin de la période ET finit après son début. Sans fin renseignée,
+  // l'événement finit à 23 h 59 de son jour de début, donc il compte si ce jour n'est pas avant `from`.
+  const and = [
+    publicVisibility(now),
+    { startsAt: { lt: range.to } },
+    { OR: [{ endsAt: { gte: range.from } }, { endsAt: null, startsAt: { gte: startOfLocalDay(range.from, env.timeZone) } }] },
+  ];
+  if (type) and.push({ type });
+
+  const rows = await prismaRaw.event.findMany({
+    where: { deletedAt: null, AND: and },
+    include: INCLUDE,
+    orderBy: [{ startsAt: "asc" }, { id: "asc" }],
+    take: CALENDAR_LIMIT + 1,
+  });
+  const truncated = rows.length > CALENDAR_LIMIT;
+  const items = rows.slice(0, CALENDAR_LIMIT).map((e) => toCalendarDto(e, lang, now));
+  return { from: range.from, to: range.to, count: items.length, truncated, items };
 }
