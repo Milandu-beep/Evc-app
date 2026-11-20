@@ -1,7 +1,7 @@
 # EVC APP - PROJECT CHARTER
-Version : 1.4
+Version : 1.5
 Statut : Validé
-Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible ; 1.3 (2026-11-20) — vidéos hébergées (MP4/WebM) via Cloudinary en plus des liens YouTube ; 1.4 (2026-11-20) — Cloudinary pour tous les fichiers (images, vidéos, PDF, audio), Supabase Storage abandonné
+Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible ; 1.3 (2026-11-20) — vidéos hébergées (MP4/WebM) via Cloudinary en plus des liens YouTube ; 1.4 (2026-11-20) — Cloudinary pour tous les fichiers (images, vidéos, PDF, audio), Supabase Storage abandonné ; 1.5 (2026-11-20) — roadmap : Événements en Sprint 4, authentification avancée en Sprint 5
 Projet : Plateforme officielle de l'Église Vie Céleste (EVC)
 
 ---
@@ -294,11 +294,11 @@ Sprint 2 — Modèle de données ✅
 
 Sprint 2.5 — Durcissement de la base (UUID, suppression logique, audit) ✅
 
-Sprint 3 — Stockage (StorageService, Cloudinary, Supabase Storage)
+Sprint 3 — Stockage (StorageService, Cloudinary) ✅
 
-Sprint 4 — Authentification avancée (permissions, rafraîchissement des tokens)
+Sprint 4 — Événements (cycle de vie, traductions, publication programmée, images, audit)
 
-Sprint 5 — Événements
+Sprint 5 — Authentification avancée (permissions, rafraîchissement des tokens)
 
 Sprint 6 — Actualités
 

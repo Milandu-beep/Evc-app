@@ -56,6 +56,16 @@ enum NotificationType {
   DAILY_MESSAGE
 }
 
+// Cycle de vie d'un événement. « Terminé » n'est pas stocké : il se déduit des dates
+// (statut PUBLISHED et date de fin dépassée), voir services/events/event.state.js.
+enum EventStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  CANCELLED
+  ARCHIVED
+}
+
 // Fournisseur de stockage des fichiers (voir docs/STORAGE_ARCHITECTURE.md)
 enum StorageProvider {
   CLOUDINARY
@@ -98,6 +108,7 @@ enum AuditAction {
   LOGIN
   UPLOAD_FILE
   DELETE_FILE
+  STATUS_CHANGE
 }
 
 enum NotificationStatus {
@@ -140,16 +151,25 @@ model Admin {
 // ----------------------------------------------------------------------------
 
 model Event {
-  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status       PublishStatus @default(DRAFT)
-  coverImageId String?       @db.Uuid
-  startsAt     DateTime
-  endsAt       DateTime?
-  isFeatured   Boolean       @default(false)
-  createdById  String?       @db.Uuid
-  createdAt    DateTime      @default(now())
-  deletedAt    DateTime?
-  updatedAt    DateTime      @updatedAt
+  id                   String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status               EventStatus @default(DRAFT)
+  coverImageId         String?     @db.Uuid
+  startsAt             DateTime
+  endsAt               DateTime?
+  isFeatured           Boolean     @default(false)
+  // Publication programmée : visible publiquement à partir de publishAt (statut SCHEDULED)
+  publishAt            DateTime?
+  publishedAt          DateTime? // première publication effective
+  cancelledAt          DateTime?
+  // Inscription (événements futurs nécessitant une inscription)
+  registrationRequired Boolean     @default(false)
+  registrationUrl      String?
+  // Préparation OneSignal (Sprint notifications) : demande d'une notification à la publication
+  notifyOnPublish      Boolean     @default(false)
+  createdById          String?     @db.Uuid
+  createdAt            DateTime    @default(now())
+  deletedAt            DateTime?
+  updatedAt            DateTime    @updatedAt
 
   coverImage    StorageFile?       @relation(fields: [coverImageId], references: [id], onDelete: SetNull)
   createdBy     Admin?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -157,6 +177,7 @@ model Event {
   notifications Notification[]
 
   @@index([status, startsAt, deletedAt])
+  @@index([status, publishAt])
   @@index([isFeatured])
   @@index([createdById])
   @@index([coverImageId])

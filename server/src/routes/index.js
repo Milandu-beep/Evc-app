@@ -2,6 +2,8 @@ import { Router } from "express";
 import healthRoutes from "./health.routes.js";
 import authRoutes from "./auth.routes.js";
 import storageRoutes from "./storage.routes.js";
+import eventsRoutes from "./events.routes.js";
+import adminEventsRoutes from "./admin.events.routes.js";
 import { sendSuccess } from "../utils/response.js";
 import { API_VERSION } from "../config/constants.js";
 
@@ -14,6 +16,8 @@ router.get("/", (req, res) =>
 router.use("/health", healthRoutes);
 router.use("/auth", authRoutes);
 router.use("/storage", storageRoutes);
+router.use("/events", eventsRoutes);
+router.use("/admin/events", adminEventsRoutes);
 
 // Les routes métier seront montées ici, sprint par sprint.
 
