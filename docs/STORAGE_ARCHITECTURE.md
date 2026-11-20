@@ -62,6 +62,7 @@ EVC/
 ├── branding/      logos/   favicon/   pwa/                       images
 ├── events/        covers/  gallery/   documents/                 images, images, PDF
 ├── news/          covers/  gallery/                              images
+├── daily-messages/                                               images
 ├── sermons/       audio/   thumbnails/   documents/              MP3, images, PDF
 ├── gallery/                                                      images, vidéos
 ├── profiles/      pastors/ admins/    users/                     images

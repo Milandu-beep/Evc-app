@@ -10,7 +10,7 @@ export const LANGS = Object.values(LANGUAGES);
  *  required : création (champs « mandatory » obligatoires) ; onlyIfPresent : la langue est facultative,
  *  mais si elle est envoyée, ses champs obligatoires le sont aussi.
  */
-function translationValidators(lang, specs, { required, onlyIfPresent = false }) {
+function translationValidators(lang, specs, { required, onlyIfPresent = false, slug = true }) {
   const f = `translations.${lang}`;
   const rules = specs.map((spec) => {
     let chain = body(`${f}.${spec.name}`);
@@ -24,7 +24,7 @@ function translationValidators(lang, specs, { required, onlyIfPresent = false })
       .trim().isLength({ min: spec.min ?? 0, max: spec.max })
       .withMessage(`${spec.name} : ${spec.min ? `${spec.min} à ` : ""}${spec.max} caractères${spec.min ? "" : " maximum"}`);
   });
-  rules.push(
+  if (slug) rules.push(
     body(`${f}.slug`)
       .optional()
       .isString().trim().isLength({ max: 100 }).matches(SLUG_PATTERN)
@@ -42,20 +42,20 @@ const noUnknownLanguages = body("translations").custom((value) => {
 });
 
 // Création : français obligatoire, autres langues facultatives.
-export const createTranslationRules = (specs) => [
+export const createTranslationRules = (specs, { slug = true } = {}) => [
   noUnknownLanguages,
   body("translations.fr").exists({ checkNull: true }).withMessage("La traduction française est obligatoire").isObject(),
-  ...translationValidators("fr", specs, { required: true }),
+  ...translationValidators("fr", specs, { required: true, slug }),
   body("translations.en").optional({ nullable: true }).isObject(),
-  ...translationValidators("en", specs, { required: true, onlyIfPresent: true }),
+  ...translationValidators("en", specs, { required: true, onlyIfPresent: true, slug }),
 ];
 
 // Modification partielle : « translations.xx: null » supprime une langue (sauf le français, vérifié par le service).
-export const updateTranslationRules = (specs) => [
+export const updateTranslationRules = (specs, { slug = true } = {}) => [
   noUnknownLanguages,
   ...LANGS.flatMap((lang) => [
     body(`translations.${lang}`).optional({ nullable: true }).isObject(),
-    ...translationValidators(lang, specs, { required: false }),
+    ...translationValidators(lang, specs, { required: false, slug }),
   ]),
 ];
 

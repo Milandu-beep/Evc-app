@@ -52,3 +52,18 @@ export const isValidTimeZone = (tz) => {
     return false;
   }
 };
+
+// Date locale « AAAA-MM-JJ » d'un instant (ex. le « jour courant » de l'église).
+export function localDateString(date, timeZone) {
+  const { y, m, d } = parts(date, timeZone);
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+// « AAAA-MM-JJ » -> Date à minuit UTC : c'est ce que Prisma attend pour une colonne @db.Date.
+export const dateOnlyToUtc = (str) => new Date(`${str}T00:00:00.000Z`);
+
+// Fin (23:59:59.999) du jour local « AAAA-MM-JJ ».
+export function endOfLocalDateString(str, timeZone) {
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(localMidnight(y, m, d, timeZone).getTime() + 24 * 3600 * 1000 - 1);
+}

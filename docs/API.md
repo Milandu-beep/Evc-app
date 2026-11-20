@@ -319,3 +319,118 @@ La liste renvoie `excerpt` (celui de l'administrateur, sinon le début du conten
 
 Événement interne émis : `news.published` `{ newsId, notifyOnPublish, reason: "manual" | "scheduled", adminId? }`.
 Audit : `CREATE`, `UPDATE` (noms de champs, jamais les textes), `STATUS_CHANGE`, `DELETE`, `RESTORE` (entité `news`).
+
+## Messages du jour
+
+Un message par **date** (jour local de l'église, `APP_TIMEZONE`, Kinshasa par défaut), avec traductions FR/EN,
+image Cloudinary, publication programmée, audit, suppression logique et lecture publique. Même architecture que les
+événements et les actualités.
+
+### Champs
+
+| Champ | Description |
+|---|---|
+| `date` | `AAAA-MM-JJ`, jour de calendrier réel. **Une seule ligne active par date** (409 sinon, voir ci-dessous) |
+| `imageId` | UUID d'un fichier image prêt (dossier de stockage `daily-messages`), `null` pour l'effacer |
+| `sendNotification` | Souhait d'une notification push (défaut `false`) |
+| `translations.<fr\|en>.title` | 3–150 caractères |
+| `…content` | 1–10 000 caractères (texte brut : le frontend doit l'échapper) |
+| `…verseReference` | ≤ 100, ex. `Jean 3:16` |
+| `…verseText` | ≤ 1 000, texte du verset |
+| `…theme` | ≤ 60, ex. `Espérance` |
+| `…notificationTitle` | ≤ 80, titre de la notification (à défaut : le titre) |
+| `…notificationBody` | ≤ 240, texte de la notification (à défaut : un extrait du contenu) |
+| `…estimatedReadingTime` | **Lecture seule**, calculé : minutes, au moins 1, à 200 mots/minute sur `content` + `verseText`. Recalculé à chaque changement de ces textes ; toute valeur envoyée est ignorée |
+
+Une date occupée par un message **archivé** reste occupée ; une date de message **supprimé** (corbeille) est libre,
+mais la restauration échoue (409) si un autre message l'a reprise entre-temps.
+
+### États et transitions
+
+Statuts : `DRAFT`, `SCHEDULED`, `PUBLISHED`, `ARCHIVED` (mêmes transitions que les actualités). Chaque message expose en
+plus `phase` : `UPCOMING` (date future), `CURRENT` (aujourd'hui) ou `PAST`.
+
+**Publié ne veut pas dire affiché** : un message n'est visible du public qu'à partir de **sa date**, même publié ou
+programmé bien avant. On peut donc préparer et publier la semaine à l'avance.
+
+| Action (POST `/admin/daily-messages/:id/<action>`) | Depuis | Vers | Corps |
+|---|---|---|---|
+| `publish` | DRAFT, SCHEDULED | PUBLISHED | — |
+| `schedule` | DRAFT, SCHEDULED | SCHEDULED | `{ "publishAt": "…" }` (≥ 1 min dans le futur, au plus tard le jour du message) |
+| `unpublish` | PUBLISHED, SCHEDULED | DRAFT | — |
+| `archive` | DRAFT, SCHEDULED, PUBLISHED | ARCHIVED | — |
+| `unarchive` | ARCHIVED | DRAFT | — |
+
+409 si la transition est impossible. Publier exige titre et contenu en français. Suppression refusée si publié
+(dépublier ou archiver d'abord) ; la restauration d'un message programmé le remet en brouillon.
+
+### Administration
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET | `/admin/daily-messages` | Liste filtrée et paginée |
+| POST | `/admin/daily-messages` | Création (brouillon) |
+| GET | `/admin/daily-messages/:id` | Détail complet, toutes langues |
+| PATCH | `/admin/daily-messages/:id` | Modification partielle (`translations.en: null` supprime l'anglais ; `null` efface un champ facultatif) |
+| DELETE | `/admin/daily-messages/:id` | Suppression logique (DRAFT, SCHEDULED, ARCHIVED) |
+| POST | `/admin/daily-messages/:id/restore` | Restauration |
+| POST | `/admin/daily-messages/:id/{publish,schedule,unpublish,archive,unarchive}` | Transitions |
+
+**Création** :
+```json
+{
+  "date": "2026-12-25",
+  "imageId": "<uuid d'un fichier image prêt>",
+  "sendNotification": true,
+  "translations": {
+    "fr": {
+      "title": "Rester ferme", "content": "…",
+      "verseReference": "Jean 3:16", "verseText": "Car Dieu a tant aimé le monde…", "theme": "Espérance",
+      "notificationTitle": "Message du jour", "notificationBody": "Une parole pour aujourd'hui"
+    },
+    "en": { "title": "Stand firm", "content": "…", "theme": "Hope" }
+  }
+}
+```
+**Liste** : `page`, `limit` (≤ 100, défaut 20), `q` (titre, contenu, référence, verset, thème), `state`, `theme` (égalité,
+insensible à la casse), `from`/`to` (dates `AAAA-MM-JJ`), `deleted`, `sort` (`date` par défaut, `createdAt`, `updatedAt`), `order`.
+
+### Lecture publique
+
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/daily-messages/today` | **Message du jour**, avec repli automatique |
+| GET | `/daily-messages/:date` | Message d'une date passée ou courante (`AAAA-MM-JJ`) |
+| GET | `/daily-messages` | Archive paginée, du plus récent au plus ancien |
+
+**Repli (`/today`).** S'il n'existe pas de message publié pour la date du jour, l'API renvoie **automatiquement le dernier
+message publié** (le plus récent par date, dans le passé) avec `"isFallback": true`. Le frontend peut alors afficher, par
+exemple, « Message du 12 décembre ». Réponse :
+```json
+{ "success": true, "data": {
+  "id": "…", "date": "2026-12-12", "requestedDate": "2026-12-14", "isFallback": true,
+  "language": "fr", "title": "…", "content": "…", "verseReference": "Psaume 23:1", "verseText": "…",
+  "theme": "Paix", "estimatedReadingTime": 2, "image": { "url": "…", "thumbnailUrl": "…" },
+  "availableLanguages": ["fr", "en"] } }
+```
+- `isFallback: false` quand le message est bien celui du jour ; `date` et `requestedDate` sont alors identiques.
+- Les brouillons, archivés, supprimés et messages à date future sont ignorés pour le repli.
+- **404** seulement s'il n'existe encore aucun message publié.
+- `/daily-messages/:date` ne fait **jamais** de repli : 404 si la date est future, inconnue ou non publiée.
+
+La liste publique renvoie un `excerpt` (début du contenu) mais pas `content` ni `verseText`. Paramètres : `lang`, `q`, `theme`,
+`from`, `to`, `page`, `limit` (défaut 12). Langue : `?lang=` sinon `Accept-Language`, sinon français, avec repli sur le français.
+Aucun champ interne n'est exposé (statut, notification, programmation, auteur). `Cache-Control: public, max-age=60`.
+
+### Préparation OneSignal
+
+Aucune notification n'est envoyée par ce module. Il émet `daily-message.published`
+`{ dailyMessageId, sendNotification, date, reason: "manual" | "scheduled", adminId? }` à la publication. **Le module de
+notifications devra attendre la `date` du message** avant d'envoyer (un message peut être publié des jours à l'avance),
+puis utiliser `notificationTitle` / `notificationBody` de la langue de l'abonné.
+
+### Audit
+
+`CREATE`, `UPDATE` (champs et dates modifiés ; pour les textes, **seulement les noms des champs**), `STATUS_CHANGE`
+(`action`, `from`, `to`, `publishAt`), `DELETE`, `RESTORE` — entité `daily_messages`. La bascule automatique de la
+publication programmée est écrite sans administrateur (`reason: "scheduled"`).

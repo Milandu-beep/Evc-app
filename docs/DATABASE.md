@@ -27,7 +27,7 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 | `admins` | Comptes Super Admin / Admin | — |
 | `events` | Événements : type (`EventType`), capacité, inscrits (`registeredCount`), couleur, icône, statut (`EventStatus`), dates, publication programmée (`publishAt`), `publishedAt`, `cancelledAt`, image de couverture, vedette, inscription (`registrationRequired`, `registrationUrl`), `notifyOnPublish` | `event_translations` : slug, titre, description, lieu |
 | `news` | Actualités : statut (`NewsStatus` : brouillon, programmé, publié, archivé), `publishAt`, `publishedAt`, vedette, `notifyOnPublish`, image de couverture | `news_translations` : slug, titre, extrait, contenu |
-| `daily_messages` | Message quotidien (une ligne par jour, `date` unique) | `daily_message_translations` : titre, contenu, référence biblique |
+| `daily_messages` | Message du jour : `date` (une seule ligne **active** par date), statut (`DailyMessageStatus`), `publishAt`, `publishedAt`, `sendNotification`, image | `daily_message_translations` : titre, contenu, `verseReference`, `verseText`, `theme`, `estimatedReadingTime` (calculé), `notificationTitle`, `notificationBody` |
 | `notifications` | Notifications OneSignal (statut, planification, lien facultatif vers événement / actualité / message) | `notification_translations` : titre, message |
 | `media` | Médiathèque : `IMAGE`, `PDF`, `AUDIO`, `YOUTUBE` | `media_translations` : titre, description |
 | `church_settings` | Paramètres de l'église (ligne unique, id = 1) : contact, réseaux | `church_setting_translations` : slogan, mission, adresse, repères |
@@ -73,6 +73,7 @@ chaque parent 1─n sa table de traductions                                     
   `media_folders(parent, nom)` (parmi les dossiers actifs).
 - `CHECK` sur `events` : `endsAt >= startsAt` ; `SCHEDULED` exige `publishAt` ; `registrationUrl` en `http(s)://`.
 - `CHECK` sur `events` : `capacity > 0` ; `registeredCount >= 0` et `<= capacity` ; `color` en `#rrggbb` ; `icon` en minuscules et tirets.
+- `CHECK` sur `daily_messages` : `SCHEDULED` exige `publishAt` ; sur `daily_message_translations` : `estimatedReadingTime >= 1`.
 - `CHECK` sur `news` : `SCHEDULED` exige `publishAt` ; sur `news_translations.slug` : minuscules, chiffres et tirets.
 - `CHECK` sur `event_translations.slug` : minuscules, chiffres et tirets.
 - `CHECK` sur `service_schedules` : heures au format `HH:mm` valide.
@@ -85,6 +86,7 @@ chaque parent 1─n sa table de traductions                                     
 | `20261120091524_init_admins` | Table `admins`, enum `Role` |
 | `20261120092905_data_model` | 15 tables, enums, index, contraintes `CHECK`, RLS |
 | `20261120100000_db_hardening` | UUID, `deletedAt`, enum `Weekday`, table `audit_logs`, index partiel de la date des messages, RLS |
+| `20261120150000_daily_messages` | Messages du jour : enum `DailyMessageStatus`, `publishAt`, `publishedAt`, `sendNotification` ; traductions : `verseReference` (ex-`bibleReference`), `verseText`, `theme`, `estimatedReadingTime`, `notificationTitle`, `notificationBody` ; contraintes `CHECK` |
 | `20261120140000_event_extras_and_news` | Événements : `EventType`, `capacity`, `registeredCount`, `color`, `icon` (contraintes `CHECK`) ; actualités : enum `NewsStatus`, `publishAt`, vedette, `notifyOnPublish`, index et contraintes (programmation, slug) |
 | `20261120130000_events_lifecycle` | Enum `EventStatus` (`DRAFT`, `SCHEDULED`, `PUBLISHED`, `CANCELLED`, `ARCHIVED` ; « terminé » est déduit), colonnes de publication, d'annulation, d'inscription et `notifyOnPublish`, index `(status, publishAt)`, contraintes `CHECK` (dates, programmation, URL, slug) |
 | `20261120120000_storage_file_status` | Statut des fichiers (`StorageFileStatus`), `url` / `secureUrl` facultatives, unicité de l'empreinte limitée aux envois en cours ou terminés |

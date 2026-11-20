@@ -42,6 +42,7 @@ export const FOLDERS = Object.freeze({
   "events/documents": ["pdf"],
   "news/covers": ["image"],
   "news/gallery": ["image"],
+  "daily-messages": ["image"],
   "sermons/audio": ["audio"],
   "sermons/thumbnails": ["image"],
   "sermons/documents": ["pdf"],

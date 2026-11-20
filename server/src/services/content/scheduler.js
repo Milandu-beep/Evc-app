@@ -12,6 +12,16 @@ import * as auditService from "../audit.service.js";
 const SOURCES = {
   events: { table: "events", entity: "events", event: "event.published", idKey: "eventId" },
   news: { table: "news", entity: "news", event: "news.published", idKey: "newsId" },
+  // La colonne de souhait de notification s'appelle sendNotification ; les messages portent aussi leur date.
+  dailyMessages: {
+    table: "daily_messages",
+    entity: "daily_messages",
+    event: "daily-message.published",
+    idKey: "dailyMessageId",
+    notifyColumn: "sendNotification",
+    notifyKey: "sendNotification",
+    extra: ['"date"'],
+  },
 };
 
 async function publishDue(source) {
@@ -23,7 +33,7 @@ async function publishDue(source) {
      WHERE "status" = 'SCHEDULED'
        AND "publishAt" <= (now() AT TIME ZONE 'UTC')
        AND "deletedAt" IS NULL
-    RETURNING "id", "notifyOnPublish"`);
+    RETURNING "id", "${source.notifyColumn ?? "notifyOnPublish"}" AS "notifyOnPublish"${(source.extra ?? []).map((c) => `, ${c}`).join("")}`);
 
   for (const row of rows) {
     await auditService.record({
@@ -32,13 +42,21 @@ async function publishDue(source) {
       entityId: row.id,
       changes: { action: "publish", from: "SCHEDULED", to: "PUBLISHED", reason: "scheduled" },
     });
-    domainEvents.emit(source.event, { [source.idKey]: row.id, notifyOnPublish: row.notifyOnPublish, reason: "scheduled" });
+    const { id, notifyOnPublish, date, ...rest } = row;
+    domainEvents.emit(source.event, {
+      [source.idKey]: id,
+      [source.notifyKey ?? "notifyOnPublish"]: notifyOnPublish,
+      ...(date && { date: date.toISOString().slice(0, 10) }),
+      ...rest,
+      reason: "scheduled",
+    });
   }
   return rows.length;
 }
 
 export const publishDueEvents = () => publishDue(SOURCES.events);
 export const publishDueNews = () => publishDue(SOURCES.news);
+export const publishDueDailyMessages = () => publishDue(SOURCES.dailyMessages);
 
 let timer = null;
 let running = false;

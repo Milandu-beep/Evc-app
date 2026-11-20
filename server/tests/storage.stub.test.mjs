@@ -148,7 +148,7 @@ await t("DELETE refusé (409) si utilisé, même par un contenu supprimé logiqu
   must((await del(img.id))[0] === 409, "supprimé logiquement");
 });
 await t("DELETE d'un envoi en cours (UPLOADING) -> 409", async () => {
-  const row = await prismaRaw.storageFile.create({ data: { provider: "CLOUDINARY", status: "UPLOADING", publicId: "EVC-dev/test/" + randomBytes(6).toString("hex"), resourceType: "IMAGE", folder: "temporary", originalFilename: "u.png", mimeType: "image/png", bytes: 1, checksum: randomBytes(32).toString("hex") } });
+  const row = await prismaRaw.storageFile.create({ data: { provider: "CLOUDINARY", status: "UPLOADING", publicId: "EVC-dev/test-storage/" + randomBytes(6).toString("hex"), resourceType: "IMAGE", folder: "temporary", originalFilename: "u.png", mimeType: "image/png", bytes: 1, checksum: randomBytes(32).toString("hex") } });
   must((await del(row.id))[0] === 409, "409 attendu");
   await prismaRaw.storageFile.delete({ where: { id: row.id } });
 });
@@ -165,7 +165,7 @@ await t("DELETE : fichier libre -> 200, supprimé chez le fournisseur et en base
 
 await t("nettoyage : dry-run ne change rien ; marquage après 24 h ; purge après 30 j ; fichier utilisé jamais touché", async () => {
   const day = 86400000;
-  const mk = (extra) => prismaRaw.storageFile.create({ data: { provider: "CLOUDINARY", status: "READY", publicId: "EVC-dev/test/" + randomBytes(6).toString("hex"), resourceType: "IMAGE", url: "http://x", secureUrl: "https://x", folder: "temporary", originalFilename: "t.png", mimeType: "image/png", bytes: 1, checksum: randomBytes(32).toString("hex"), ...extra } });
+  const mk = (extra) => prismaRaw.storageFile.create({ data: { provider: "CLOUDINARY", status: "READY", publicId: "EVC-dev/test-storage/" + randomBytes(6).toString("hex"), resourceType: "IMAGE", url: "http://x", secureUrl: "https://x", folder: "temporary", originalFilename: "t.png", mimeType: "image/png", bytes: 1, checksum: randomBytes(32).toString("hex"), ...extra } });
   const old = await mk({ createdAt: new Date(Date.now() - 2 * day) });
   const recent = await mk({});
   const used = await mk({ createdAt: new Date(Date.now() - 90 * day) });
@@ -186,7 +186,7 @@ await t("nettoyage : dry-run ne change rien ; marquage après 24 h ; purge aprè
   await prismaRaw.event.delete({ where: { id: usedEv.id } }); await prismaRaw.storageFile.deleteMany({ where: { id: { in: [recent.id, used.id] } } });
 });
 await t("nettoyage : envoi UPLOADING interrompu -> FAILED ; FAILED ancien supprimé ; envoi récent intact", async () => {
-  const mk = (extra) => prismaRaw.storageFile.create({ data: { provider: "CLOUDINARY", publicId: "EVC-dev/test/" + randomBytes(6).toString("hex"), resourceType: "IMAGE", folder: "temporary", originalFilename: "s.png", mimeType: "image/png", bytes: 1, checksum: randomBytes(32).toString("hex"), ...extra } });
+  const mk = (extra) => prismaRaw.storageFile.create({ data: { provider: "CLOUDINARY", publicId: "EVC-dev/test-storage/" + randomBytes(6).toString("hex"), resourceType: "IMAGE", folder: "temporary", originalFilename: "s.png", mimeType: "image/png", bytes: 1, checksum: randomBytes(32).toString("hex"), ...extra } });
   const stuck = await mk({ status: "UPLOADING", createdAt: new Date(Date.now() - 2 * 3600000) });
   const fresh = await mk({ status: "UPLOADING" });
   const oldFailed = await mk({ status: "FAILED", createdAt: new Date(Date.now() - 8 * 86400000) });
@@ -200,7 +200,7 @@ await t("nettoyage : envoi UPLOADING interrompu -> FAILED ; FAILED ancien suppri
 await t("aucun fichier temporaire restant (fin)", async () => must(tmpFiles().length === 0, "tmp: " + tmpFiles()));
 
 // --- Nettoyage des données de test ---
-await prismaRaw.storageFile.deleteMany({ where: { OR: [{ createdAt: { gte: started } }, { publicId: { startsWith: "EVC-dev/test/" } }] } });
+await prismaRaw.storageFile.deleteMany({ where: { OR: [{ createdAt: { gte: started } }, { publicId: { startsWith: "EVC-dev/test-storage/" } }] } });
 await prismaRaw.auditLog.deleteMany({ where: { createdAt: { gte: started }, action: { in: ["UPLOAD_FILE", "DELETE_FILE"] } } });
 await new Promise((r) => server.close(r));
 await prismaRaw.$disconnect();

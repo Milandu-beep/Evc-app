@@ -26,6 +26,7 @@ Chaque envoi précise un dossier. Un type non autorisé dans ce dossier est refu
 | `events/gallery` | image | Photos d'un événement |
 | `events/documents` | PDF | Programme, document d'un événement |
 | `news/covers` · `news/gallery` | image | Actualités |
+| `daily-messages` | image | Illustration d'un message du jour |
 | `sermons/audio` | MP3 | Prédications |
 | `sermons/thumbnails` | image | Vignettes de prédications |
 | `sermons/documents` | PDF | Notes, plans de prédication |

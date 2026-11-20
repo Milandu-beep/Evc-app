@@ -75,6 +75,10 @@ export async function buildCreateRows(translations, { textFields, slugTools }) {
   const rows = [];
   for (const [language, t] of Object.entries(translations)) {
     if (!t) continue;
+    if (!slugTools) {
+      rows.push({ language, ...pick(t, textFields) }); // contenu sans slug (ex. message du jour : l'URL est sa date)
+      continue;
+    }
     const slug = t.slug ?? (await slugTools.uniqueSlug(language, t.title));
     if (t.slug) await slugTools.assertSlugFree(language, slug);
     rows.push({ language, slug, ...pick(t, textFields) });
@@ -109,6 +113,11 @@ export async function planTranslations({ existingByLang, translations, textField
     if (!existing) {
       const missing = requiredOnCreate.filter((f) => !t[f]);
       if (missing.length) throw invalid(`translations.${language}`, `${missing.join(" et ")} requis pour créer une traduction`);
+      if (!slugTools) {
+        ops.push({ kind: "create", data: { language, ...pick(t, textFields) } });
+        changes[language] = "created";
+        continue;
+      }
       const slug = t.slug ?? (await slugTools.uniqueSlug(language, t.title, parentId));
       if (t.slug) await slugTools.assertSlugFree(language, slug, parentId);
       ops.push({ kind: "create", data: { language, slug, ...pick(t, textFields) } });
@@ -120,7 +129,7 @@ export async function planTranslations({ existingByLang, translations, textField
     for (const key of textFields) {
       if (key in t && (t[key] ?? null) !== (existing[key] ?? null)) data[key] = t[key] ?? null;
     }
-    if (t.slug && t.slug !== existing.slug) {
+    if (slugTools && t.slug && t.slug !== existing.slug) {
       await slugTools.assertSlugFree(language, t.slug, parentId);
       data.slug = t.slug;
     }

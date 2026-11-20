@@ -86,6 +86,14 @@ enum NewsStatus {
   ARCHIVED
 }
 
+// Cycle de vie d'un message du jour (même logique que les actualités)
+enum DailyMessageStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
 // Fournisseur de stockage des fichiers (voir docs/STORAGE_ARCHITECTURE.md)
 enum StorageProvider {
   CLOUDINARY
@@ -282,14 +290,21 @@ model NewsTranslation {
 // ----------------------------------------------------------------------------
 
 model DailyMessage {
-  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  date        DateTime      @db.Date
-  status      PublishStatus @default(DRAFT)
-  imageId     String?       @db.Uuid
-  createdById String?       @db.Uuid
-  createdAt   DateTime      @default(now())
-  deletedAt   DateTime?
-  updatedAt   DateTime      @updatedAt
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date             DateTime           @db.Date
+  status           DailyMessageStatus @default(DRAFT)
+  imageId          String?            @db.Uuid
+  // Publication programmée : le message devient publiable à partir de publishAt (statut SCHEDULED).
+  // Il n'est affiché qu'à partir de sa date (« date »), même s'il est publié plus tôt.
+  publishAt        DateTime?
+  publishedAt      DateTime?
+  // Préparation OneSignal : le module de notifications enverra le titre et le texte de notification
+  // (par langue) le jour du message si sendNotification est vrai.
+  sendNotification Boolean            @default(false)
+  createdById      String?            @db.Uuid
+  createdAt        DateTime           @default(now())
+  deletedAt        DateTime?
+  updatedAt        DateTime           @updatedAt
 
   image         StorageFile?              @relation(fields: [imageId], references: [id], onDelete: SetNull)
   createdBy     Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -299,22 +314,31 @@ model DailyMessage {
   // Unicité (date) WHERE deletedAt IS NULL : voir migration SQL (index partiel)
   @@index([date])
   @@index([status, date, deletedAt])
+  @@index([status, publishAt])
   @@index([createdById])
   @@index([imageId])
   @@map("daily_messages")
 }
 
 model DailyMessageTranslation {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  dailyMessageId String   @db.Uuid
-  language       Language
-  title          String
-  content        String
-  bibleReference String? // ex. « Jean 3:16 »
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dailyMessageId       String   @db.Uuid
+  language             Language
+  title                String
+  content              String
+  verseReference       String? // ex. « Jean 3:16 »
+  verseText            String? // texte du verset
+  theme                String? // ex. « Espérance »
+  // Temps de lecture en minutes (au moins 1) : CALCULÉ par l'application, jamais saisi
+  estimatedReadingTime Int      @default(1)
+  // Notification push (facultatifs) : à défaut, le module de notifications utilisera le titre et un extrait
+  notificationTitle    String?
+  notificationBody     String?
 
   dailyMessage DailyMessage @relation(fields: [dailyMessageId], references: [id], onDelete: Cascade)
 
   @@unique([dailyMessageId, language])
+  @@index([language, theme])
   @@map("daily_message_translations")
 }
 

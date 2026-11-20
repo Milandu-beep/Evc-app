@@ -6,6 +6,8 @@ import eventsRoutes from "./events.routes.js";
 import adminEventsRoutes from "./admin.events.routes.js";
 import newsRoutes from "./news.routes.js";
 import adminNewsRoutes from "./admin.news.routes.js";
+import dailyMessagesRoutes from "./dailyMessages.routes.js";
+import adminDailyMessagesRoutes from "./admin.dailyMessages.routes.js";
 import { sendSuccess } from "../utils/response.js";
 import { API_VERSION } from "../config/constants.js";
 
@@ -22,6 +24,8 @@ router.use("/events", eventsRoutes);
 router.use("/admin/events", adminEventsRoutes);
 router.use("/news", newsRoutes);
 router.use("/admin/news", adminNewsRoutes);
+router.use("/daily-messages", dailyMessagesRoutes);
+router.use("/admin/daily-messages", adminDailyMessagesRoutes);
 
 // Les routes métier seront montées ici, sprint par sprint.
 
