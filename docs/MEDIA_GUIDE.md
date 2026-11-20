@@ -27,7 +27,9 @@ Chaque envoi précise un dossier. Un type non autorisé dans ce dossier est refu
 | `events/documents` | PDF | Programme, document d'un événement |
 | `news/covers` · `news/gallery` | image | Actualités |
 | `daily-messages` | image | Illustration d'un message du jour |
+| `people` | image | Photo d'une personne (fiche pasteur, équipe, intervenant) |
 | `sermons/audio` | MP3 | Prédications |
+| `sermons/video` | vidéo | Vidéo hébergée d'une prédication (sinon : lien YouTube) |
 | `sermons/thumbnails` | image | Vignettes de prédications |
 | `sermons/documents` | PDF | Notes, plans de prédication |
 | `gallery` | image, vidéo | Galerie générale (classée par date d'envoi) |
@@ -151,3 +153,18 @@ vidéos : MP4, WebM (100 Mo). Les fichiers audio et PDF ne sont pas acceptés da
 
 Conseils : donnez un **texte alternatif** à chaque photo importante (accessibilité), et 3 à 5 **tags** courts et réutilisés
 (`bapteme`, `jeunesse`, `noel`…) plutôt que beaucoup de tags uniques : ce sont eux qui font fonctionner la recherche transversale.
+
+## 10. Prédications et personnes
+
+À rattacher à une prédication (par leur identifiant, après un envoi via `POST /api/storage/upload`) :
+
+| Élément | Dossier de stockage | Type |
+|---|---|---|
+| Audio | `sermons/audio` | MP3 |
+| Vidéo hébergée | `sermons/video` | MP4, WebM (100 Mo) |
+| Document d'accompagnement (notes, plan) | `sermons/documents` | PDF |
+| Couverture d'une prédication ou d'une série | `sermons/thumbnails` | image |
+| Photo d'une personne | `people` | image |
+
+Une vidéo peut aussi être un **lien YouTube** (recommandé pour une prédication longue : pas de limite de taille, pas de quota
+Cloudinary). Une prédication a une vidéo hébergée **ou** un lien YouTube, pas les deux.

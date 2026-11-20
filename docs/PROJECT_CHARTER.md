@@ -1,7 +1,7 @@
 # EVC APP - PROJECT CHARTER
-Version : 1.8
+Version : 1.9
 Statut : Validé
-Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible ; 1.3 (2026-11-20) — vidéos hébergées (MP4/WebM) via Cloudinary en plus des liens YouTube ; 1.4 (2026-11-20) — Cloudinary pour tous les fichiers (images, vidéos, PDF, audio), Supabase Storage abandonné ; 1.5 (2026-11-20) — roadmap : Événements en Sprint 4, authentification avancée en Sprint 5 ; 1.6 (2026-11-20) — roadmap en 15 étapes (Actualités, Messages du jour, Galerie, Prédications avant les notifications et le tableau de bord) ; 1.7 (2026-11-20) — Actualités (5) et Messages du jour (6) réalisés ; 1.8 (2026-11-20) — Galerie (7) réalisée
+Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible ; 1.3 (2026-11-20) — vidéos hébergées (MP4/WebM) via Cloudinary en plus des liens YouTube ; 1.4 (2026-11-20) — Cloudinary pour tous les fichiers (images, vidéos, PDF, audio), Supabase Storage abandonné ; 1.5 (2026-11-20) — roadmap : Événements en Sprint 4, authentification avancée en Sprint 5 ; 1.6 (2026-11-20) — roadmap en 15 étapes (Actualités, Messages du jour, Galerie, Prédications avant les notifications et le tableau de bord) ; 1.7 (2026-11-20) — Actualités (5) et Messages du jour (6) réalisés ; 1.8 (2026-11-20) — Galerie (7) réalisée ; 1.9 (2026-11-20) — Prédications (8) réalisées, avec la table générique People
 Projet : Plateforme officielle de l'Église Vie Céleste (EVC)
 
 ---
@@ -295,7 +295,7 @@ Supabase
 5. Actualités ✅
 6. Messages du jour ✅
 7. Galerie ✅
-8. Prédications
+8. Prédications ✅
 9. Notifications OneSignal
 10. Tableau de bord
 11. Authentification avancée (refresh tokens, permissions fines)

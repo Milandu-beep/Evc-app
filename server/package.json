@@ -13,7 +13,9 @@
     "test:events": "node tests/events.test.mjs",
     "test:news": "node tests/news.test.mjs",
     "test:daily-messages": "node tests/dailyMessages.test.mjs",
-    "test:gallery": "node tests/gallery.test.mjs"
+    "test:gallery": "node tests/gallery.test.mjs",
+    "test:people": "node tests/people.test.mjs",
+    "test:sermons": "node tests/sermons.test.mjs"
   },
   "keywords": [],
   "author": "",

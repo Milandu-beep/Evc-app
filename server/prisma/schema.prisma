@@ -100,6 +100,34 @@ enum GalleryItemType {
   VIDEO
 }
 
+// Catégories d'une personne (une personne peut en cumuler plusieurs : pasteur ET prédicateur)
+enum PersonCategory {
+  PASTOR
+  TEAM
+  SPEAKER
+  LEADER
+  OTHER
+}
+
+// Rôle d'un intervenant dans une prédication (une prédication peut en avoir plusieurs)
+enum SpeakerRole {
+  PREACHER
+  GUEST_PREACHER
+  TRANSLATOR
+  WORSHIP_LEADER
+  MODERATOR
+  PRAYER
+  OTHER
+}
+
+// Cycle de vie d'une prédication (même logique que les actualités)
+enum SermonStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  ARCHIVED
+}
+
 // Fournisseur de stockage des fichiers (voir docs/STORAGE_ARCHITECTURE.md)
 enum StorageProvider {
   CLOUDINARY
@@ -178,6 +206,9 @@ model Admin {
   storageFiles  StorageFile[]
   galleryAlbums GalleryAlbum[]
   galleryItems  GalleryItem[]
+  people        Person[]
+  sermonSeries  SermonSeries[]
+  sermons       Sermon[]
 
   @@map("admins")
 }
@@ -574,14 +605,20 @@ model StorageFile {
   createdAt        DateTime            @default(now())
   deletedAt        DateTime?
 
-  createdBy      Admin?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  events         Event[]
-  news           News[]
-  dailyMessages  DailyMessage[]
-  churchSettings ChurchSetting[]
-  media          Media[]
-  galleryCovers  GalleryAlbum[]
-  galleryItems   GalleryItem[]
+  createdBy       Admin?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  events          Event[]
+  news            News[]
+  dailyMessages   DailyMessage[]
+  churchSettings  ChurchSetting[]
+  media           Media[]
+  galleryCovers   GalleryAlbum[]
+  galleryItems    GalleryItem[]
+  peoplePhotos    Person[]
+  seriesCovers    SermonSeries[]
+  sermonCovers    Sermon[]         @relation("SermonCover")
+  sermonAudios    Sermon[]         @relation("SermonAudio")
+  sermonVideos    Sermon[]         @relation("SermonVideo")
+  sermonDocuments SermonDocument[]
 
   @@unique([provider, resourceType, publicId])
   @@index([checksum])
@@ -699,4 +736,208 @@ model GalleryItemTranslation {
 
   @@unique([itemId, language])
   @@map("gallery_item_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Personnes : table GÉNÉRIQUE réutilisable (page des pasteurs, équipe, intervenants, responsables…).
+// Le nom n'est pas traduit ; le titre (« Pasteur principal ») et la biographie le sont.
+// ----------------------------------------------------------------------------
+
+model Person {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status      PublishStatus    @default(DRAFT) // visibilité de la FICHE publique (le nom reste affiché sur les prédications)
+  firstName   String
+  lastName    String
+  slug        String           @unique // identifiant d'URL, généré depuis le nom
+  categories  PersonCategory[] @default([])
+  sortOrder   Int              @default(0)
+  photoId     String?          @db.Uuid
+  publishedAt DateTime?
+  createdById String?          @db.Uuid
+  createdAt   DateTime         @default(now())
+  deletedAt   DateTime?
+  updatedAt   DateTime         @updatedAt
+
+  photo          StorageFile?        @relation(fields: [photoId], references: [id], onDelete: SetNull)
+  createdBy      Admin?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations   PersonTranslation[]
+  sermonSpeakers SermonSpeaker[]
+
+  @@index([status, deletedAt])
+  @@index([sortOrder])
+  @@index([photoId])
+  @@index([createdById])
+  @@map("people")
+}
+
+model PersonTranslation {
+  id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  personId String   @db.Uuid
+  language Language
+  title    String? // ex. « Pasteur principal »
+  bio      String?
+
+  person Person @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@unique([personId, language])
+  @@map("person_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Séries de prédications
+// ----------------------------------------------------------------------------
+
+model SermonSeries {
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status       PublishStatus @default(DRAFT)
+  sortOrder    Int           @default(0)
+  isFeatured   Boolean       @default(false)
+  coverImageId String?       @db.Uuid
+  publishedAt  DateTime?
+  createdById  String?       @db.Uuid
+  createdAt    DateTime      @default(now())
+  deletedAt    DateTime?
+  updatedAt    DateTime      @updatedAt
+
+  coverImage   StorageFile?              @relation(fields: [coverImageId], references: [id], onDelete: SetNull)
+  createdBy    Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations SermonSeriesTranslation[]
+  sermons      Sermon[]
+
+  @@index([status, deletedAt])
+  @@index([sortOrder])
+  @@index([isFeatured])
+  @@index([coverImageId])
+  @@index([createdById])
+  @@map("sermon_series")
+}
+
+model SermonSeriesTranslation {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seriesId    String   @db.Uuid
+  language    Language
+  slug        String
+  title       String
+  description String?
+
+  series SermonSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, language])
+  @@unique([language, slug])
+  @@map("sermon_series_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Prédications : audio MP3, vidéo (hébergée ou lien YouTube), documents PDF, verset(s), tags, compteurs
+// ----------------------------------------------------------------------------
+
+model Sermon {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status          SermonStatus @default(DRAFT)
+  date            DateTime     @db.Date // date de la prédication
+  seriesId        String?      @db.Uuid
+  seriesPosition  Int? // numéro dans la série (1, 2, 3…)
+  coverImageId    String?      @db.Uuid
+  audioFileId     String?      @db.Uuid // MP3 hébergé
+  videoFileId     String?      @db.Uuid // vidéo hébergée (Cloudinary)
+  youtubeId       String? // OU lien YouTube (identifiant de 11 caractères) : pas les deux
+  isFeatured      Boolean      @default(false)
+  notifyOnPublish Boolean      @default(false) // préparation OneSignal
+  tags            String[]     @default([]) // minuscules, chiffres et tirets ; index GIN dans la migration
+  publishAt       DateTime?
+  publishedAt     DateTime?
+  // Compteurs : modifiés uniquement par les routes publiques de comptage, jamais par l'administration
+  viewCount       Int          @default(0)
+  playCount       Int          @default(0)
+  downloadCount   Int          @default(0)
+  createdById     String?      @db.Uuid
+  createdAt       DateTime     @default(now())
+  deletedAt       DateTime?
+  updatedAt       DateTime     @updatedAt
+
+  series       SermonSeries?       @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  coverImage   StorageFile?        @relation("SermonCover", fields: [coverImageId], references: [id], onDelete: SetNull)
+  audioFile    StorageFile?        @relation("SermonAudio", fields: [audioFileId], references: [id], onDelete: SetNull)
+  videoFile    StorageFile?        @relation("SermonVideo", fields: [videoFileId], references: [id], onDelete: SetNull)
+  createdBy    Admin?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations SermonTranslation[]
+  speakers     SermonSpeaker[]
+  documents    SermonDocument[]
+
+  @@index([status, date, deletedAt])
+  @@index([status, publishAt])
+  @@index([seriesId, seriesPosition])
+  @@index([isFeatured])
+  @@index([playCount])
+  @@index([coverImageId])
+  @@index([audioFileId])
+  @@index([videoFileId])
+  @@index([createdById])
+  @@map("sermons")
+}
+
+model SermonTranslation {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sermonId        String   @db.Uuid
+  language        Language
+  slug            String
+  title           String
+  description     String?
+  theme           String? // ex. « Espérance »
+  verseReferences String[] @default([]) // ex. « Jean 3:16 », « Psaume 23 » (10 au plus)
+
+  sermon Sermon @relation(fields: [sermonId], references: [id], onDelete: Cascade)
+
+  @@unique([sermonId, language])
+  @@unique([language, slug])
+  @@index([language, theme])
+  @@map("sermon_translations")
+}
+
+// Intervenants d'une prédication, avec leur rôle. L'interface actuelle n'en utilise qu'un (PREACHER) ;
+// le modèle accepte plusieurs personnes et plusieurs rôles sans changement.
+model SermonSpeaker {
+  id       String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sermonId String      @db.Uuid
+  personId String      @db.Uuid
+  role     SpeakerRole @default(PREACHER)
+  position Int         @default(0)
+
+  sermon Sermon @relation(fields: [sermonId], references: [id], onDelete: Cascade)
+  person Person @relation(fields: [personId], references: [id], onDelete: Restrict)
+
+  @@unique([sermonId, personId, role])
+  @@index([sermonId, position])
+  @@index([personId])
+  @@map("sermon_speakers")
+}
+
+// Documents PDF d'accompagnement (notes, plan…)
+model SermonDocument {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sermonId      String   @db.Uuid
+  storageFileId String   @db.Uuid
+  position      Int      @default(0)
+  createdAt     DateTime @default(now())
+
+  sermon       Sermon                      @relation(fields: [sermonId], references: [id], onDelete: Cascade)
+  storageFile  StorageFile                 @relation(fields: [storageFileId], references: [id], onDelete: Restrict)
+  translations SermonDocumentTranslation[]
+
+  @@unique([sermonId, storageFileId])
+  @@index([sermonId, position])
+  @@index([storageFileId])
+  @@map("sermon_documents")
+}
+
+model SermonDocumentTranslation {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId String   @db.Uuid
+  language   Language
+  title      String
+
+  document SermonDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, language])
+  @@map("sermon_document_translations")
 }

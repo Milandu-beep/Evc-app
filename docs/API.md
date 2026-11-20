@@ -523,3 +523,115 @@ charge du frontend.
 Entités `gallery_albums` et `gallery_items` : `CREATE` (un enregistrement par import ou rattachement : nombre, identifiants,
 tags), `UPDATE` (champs, tags ; **jamais les textes** ; déplacement et réorganisation compris), `STATUS_CHANGE`, `DELETE`,
 `RESTORE`. Chaque fichier envoyé par l'import écrit aussi `UPLOAD_FILE`.
+
+## Personnes (table générique)
+
+Une seule table pour toutes les personnes de l'église : page des pasteurs, équipe, responsables, intervenants. Le **nom** n'est pas
+traduit ; le **titre** (« Pasteur principal ») et la **biographie** le sont (FR/EN, tous deux facultatifs, aucune langue obligatoire).
+Une personne a une ou plusieurs **catégories** : `PASTOR`, `TEAM`, `SPEAKER`, `LEADER`, `OTHER`. Les autres modules (prédications
+aujourd'hui, événements ou équipe demain) s'y réfèrent par leur identifiant. Aucune coordonnée privée n'est stockée.
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET / POST | `/admin/people` | Liste (`q`, `status`, `category`, `deleted`, `sort`, `order`, `page`, `limit`) / création |
+| GET / PATCH | `/admin/people/:id` | Détail / modification partielle (`photoId: null` efface la photo ; `translations.en: null` retire une langue) |
+| DELETE · POST | `/admin/people/:id` · `/:id/restore` | Suppression logique (brouillon ou archivée) / restauration |
+| POST | `/admin/people/:id/{publish,unpublish,archive,unarchive}` | Visibilité de la **fiche** publique |
+| GET | `/people` · `/people/:slug` | Lecture publique : `q`, `category`, `lang`, `page`, `limit` ; le détail ajoute `sermonCount` |
+
+Corps : `firstName`, `lastName` (1–80 caractères), `categories`, `sortOrder` (ordre d'affichage, puis nom), `photoId` (dossier `people`),
+`slug` (généré depuis le nom, `-2` en cas de doublon, stable ensuite), `translations.<fr|en>.{ title (≤ 120), bio (≤ 5000) }`.
+
+- **Fiche publique ≠ présence sur une prédication** : une personne dont la fiche n'est pas publiée reste **nommée** comme intervenante
+  d'une prédication publiée, mais sans lien (`slug: null`) ni photo.
+- Une personne qui intervient dans une prédication **ne peut pas être supprimée** (409 : retirez-la d'abord de chacune).
+- Audit : entité `people` (les biographies n'y figurent jamais).
+
+## Prédications
+
+Audio MP3, vidéo hébergée **ou** lien YouTube, documents PDF, versets, thèmes, tags, séries, intervenants avec rôle, compteurs,
+publication programmée. Mêmes briques que les événements et actualités : traductions FR/EN (slug par langue), image Cloudinary,
+suppression logique, audit, lecture publique localisée. Administration sous `/admin/sermons` et `/admin/sermon-series` ; lecture
+publique sous `/sermons` et `/sermon-series`.
+
+### Champs d'une prédication
+
+| Champ | Description |
+|---|---|
+| `date` | `AAAA-MM-JJ` (obligatoire) : date de la prédication |
+| `seriesId`, `seriesPosition` | Série (facultative) et numéro dans la série (≥ 1, exige une série ; retirer la série l'efface) |
+| `audioFileId` | MP3 déjà envoyé (dossier `sermons/audio`) |
+| `videoFileId` **ou** `youtubeUrl` | Vidéo hébergée **ou** lien YouTube (`youtu.be/…`, `youtube.com/watch?v=…`, `/embed/`, `/shorts/`, `/live/`) ; **jamais les deux** (422). L'identifiant à 11 caractères est extrait et le lien est réécrit proprement |
+| `coverImageId` | Couverture. Sans elle : miniature YouTube, puis vidéo hébergée, puis couverture de la série |
+| `tags` | Normalisés (`Persévérance 2026` → `perseverance-2026`), 20 au plus |
+| `isFeatured`, `notifyOnPublish` | Mise en avant ; souhait de notification (préparation OneSignal) |
+| `preacherId` **ou** `speakers` | Intervenants (voir plus bas) |
+| `translations.<fr\|en>` | `title` (3–150, FR obligatoire), `description` (≤ 3000), `theme` (≤ 60), `verseReferences` (tableau, 10 références de 80 caractères au plus ; lignes vides et doublons retirés) |
+
+La **durée** (`durationSeconds`) vient du fichier audio, sinon de la vidéo hébergée. Les **compteurs** (`stats.views`, `stats.plays`,
+`stats.downloads`) sont en lecture seule : l'administration ne peut pas les modifier.
+
+### Intervenants et rôles
+
+Le modèle accepte **plusieurs personnes avec chacune un rôle** (`SpeakerRole` : `PREACHER`, `GUEST_PREACHER`, `TRANSLATOR`,
+`WORSHIP_LEADER`, `MODERATOR`, `PRAYER`, `OTHER`), dans l'ordre fourni ; une même personne peut cumuler des rôles différents, jamais deux fois le même.
+L'interface actuelle n'utilise qu'un prédicateur : `preacherId` est un **raccourci** (équivaut à `speakers: [{ personId, role: "PREACHER" }]` ;
+`preacherId: null` retire tous les intervenants). `speakers` remplace la liste complète (10 au plus) ; envoyer les deux est refusé (422).
+En lecture publique, `speakers` donne tous les rôles et `preacher` le premier `PREACHER` (raccourci pour l'interface).
+
+### États et transitions (comme les actualités)
+
+`DRAFT`, `SCHEDULED`, `PUBLISHED`, `ARCHIVED`. Actions `POST /admin/sermons/:id/<action>` : `publish`, `schedule` (`{ "publishAt": "…" }`,
+≥ 1 min dans le futur), `unpublish`, `archive`, `unarchive` ; 409 si impossible. **Publier ou programmer exige un titre français et au moins
+un média** (audio, vidéo ou YouTube). Visible à l'heure exacte de `publishAt` ; une tâche de fond bascule ensuite le statut (atomique).
+Suppression logique refusée si publiée. Événement de domaine **`sermon.published`** `{ sermonId, notifyOnPublish, reason: "manual" | "scheduled", adminId? }`
+pour les futures notifications.
+
+### Administration
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET / POST | `/admin/sermons` | Liste / création |
+| GET / PATCH / DELETE | `/admin/sermons/:id` | Détail / modification / suppression logique |
+| POST | `/admin/sermons/:id/{publish,schedule,unpublish,archive,unarchive,restore}` | Transitions et restauration |
+| POST | `/admin/sermons/:id/documents` | Ajoute des PDF : `{ "documents": [{ "storageFileId", "translations": { "fr": { "title" } } }] }` (20 au plus ; sans titre français, le nom du fichier sert de titre ; doublons ignorés ; non-PDF refusés — rapport `{ created, skipped, failed }`) |
+| PATCH · DELETE | `/admin/sermons/documents/:docId` | Titres par langue / retire le lien (le fichier reste au stockage) |
+| PUT | `/admin/sermons/:id/documents/order` | Ordre : `{ "documentIds": [...] }` (liste exacte, sinon 409) |
+| GET | `/admin/sermons/tags` | Tags utilisés et leur nombre d'usages |
+| GET / POST / PATCH / DELETE … | `/admin/sermon-series[/:id[/…]]` | Séries : mêmes opérations (`publish`, `unpublish`, `archive`, `unarchive`, `restore`) ; suppression refusée (409) si la série contient des prédications |
+
+**Filtres communs** (administration et public) : `q` (titre, description, thème, slug, tag, **nom d'intervenant**, titre de série, **verset**),
+`tags` + `match` (`all` par défaut ou `any`), `theme` (égalité, insensible à la casse), `verse` (contient, ex. `jean 3` trouve « Jean 3:16 »),
+`seriesId`, `speakerId` + `role`, `featured`, `hasAudio`, `hasVideo` (hébergée ou YouTube), `from` / `to`, `page`, `limit` (≤ 100).
+Administration en plus : `state`, `deleted`, `sort` (`date` défaut, `createdAt`, `updatedAt`, `playCount`, `viewCount`, `downloadCount`), `order`.
+
+### Lecture publique
+
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/sermons` | Liste. Filtres ci-dessus + `series` (slug) + `lang` ; `sort` : `recent` (défaut), `oldest`, `popular` (écoutes) |
+| GET | `/sermons/:slug` | Détail (slug dans la langue demandée) |
+| GET | `/sermons/tags` | Tags des prédications publiées, avec compteurs |
+| POST | `/sermons/:id/{views,plays,downloads}` | **Compteurs** |
+| GET | `/sermon-series` · `/sermon-series/:slug` | Séries publiées (`sermonCount`) ; le détail liste leurs prédications dans l'ordre de la série (numéro, puis date) |
+
+- **Liste** : `excerpt` (début de la description) mais pas `description`. **Détail** : `description`, `audio` (`url`, `duration`, `bytes`),
+  `video` (hébergée : `url`, `thumbnailUrl`, `duration`) ou `youtube` (`id`, `watchUrl`, `embedUrl`, `thumbnailUrl`), `documents`
+  (`title` localisé, `url`, `bytes`), `speakers`, `preacher`, `series`, `tags`, `verseReferences`, `stats`. Aucun champ interne.
+- Une **série non publiée** est masquée sur ses prédications (`series: null`) et sa couverture n'est pas utilisée.
+- Langue : `?lang=` sinon `Accept-Language`, sinon français, avec repli sur le français. `Cache-Control: public, max-age=60` (sauf les compteurs).
+
+### Compteurs
+
+`POST /sermons/:id/views` (page consultée), `/plays` (lecture audio ou vidéo), `/downloads` (téléchargement audio ou document). À appeler
+par le frontend aux moments voulus : un `GET` ne compte rien (il est mis en cache). Réponse `{ counted, stats }`.
+- Un visiteur (adresse IP) n'est compté **qu'une fois par type et par période de 30 minutes** (`counted: false` ensuite, sans erreur).
+- L'incrément est **atomique** en base (aucune perte en cas de requêtes simultanées) ; les prédications non publiées, supprimées ou
+  inconnues répondent 404. Limite : 120 requêtes par minute et par IP.
+- **Limites connues** : l'anti-doublon est en **mémoire** (une seule instance du serveur ; au redémarrage il repart de zéro) ; derrière un
+  proxy ou un équilibreur il faudra configurer `trust proxy` pour que l'adresse IP soit celle du visiteur et non celle du proxy.
+
+### Audit
+
+Entités `sermons`, `sermon_documents`, `sermon_series`, `people` : `CREATE`, `UPDATE` (champs, tags, intervenants avant/après ; **jamais les textes**),
+`STATUS_CHANGE`, `DELETE`, `RESTORE`. La bascule programmée est écrite sans administrateur (`reason: "scheduled"`).

@@ -65,23 +65,25 @@ export function makeSlugTools(delegateName, parentKey, { reserved = [] } = {}) {
   };
 }
 
-const pick = (obj, fields) => Object.fromEntries(fields.map((f) => [f, obj[f] ?? null]));
+// Champs de texte d'une traduction ; un champ « tableau » (arrayFields) vaut [] plutôt que null s'il est absent.
+const pick = (obj, fields, arrayFields = []) => Object.fromEntries(fields.map((f) => [f, obj[f] ?? (arrayFields.includes(f) ? [] : null)]));
+const sameText = (a, b) => (Array.isArray(a) || Array.isArray(b) ? JSON.stringify(a ?? []) === JSON.stringify(b ?? []) : (a ?? null) === (b ?? null));
 
 /**
  * Lignes de traduction à la création. Le français est obligatoire.
  *  textFields : champs de texte de la table (ex. ["title", "description", "location"]).
  */
-export async function buildCreateRows(translations, { textFields, slugTools }) {
+export async function buildCreateRows(translations, { textFields, slugTools, arrayFields = [] }) {
   const rows = [];
   for (const [language, t] of Object.entries(translations)) {
     if (!t) continue;
     if (!slugTools) {
-      rows.push({ language, ...pick(t, textFields) }); // contenu sans slug (ex. message du jour : l'URL est sa date)
+      rows.push({ language, ...pick(t, textFields, arrayFields) }); // contenu sans slug (ex. message du jour : l'URL est sa date)
       continue;
     }
     const slug = t.slug ?? (await slugTools.uniqueSlug(language, t.title));
     if (t.slug) await slugTools.assertSlugFree(language, slug);
-    rows.push({ language, slug, ...pick(t, textFields) });
+    rows.push({ language, slug, ...pick(t, textFields, arrayFields) });
   }
   if (!rows.some((r) => r.language === DEFAULT_LANGUAGE)) {
     throw invalid(`translations.${DEFAULT_LANGUAGE}`, "La traduction française est obligatoire");
@@ -94,7 +96,7 @@ export async function buildCreateRows(translations, { textFields, slugTools }) {
  * (sauf le français). Retourne { ops, changes } : les opérations à exécuter et un résumé pour l'audit
  * qui ne contient JAMAIS le texte, seulement les noms des champs modifiés.
  */
-export async function planTranslations({ existingByLang, translations, textFields, requiredOnCreate, slugTools, parentId, requireDefault = true }) {
+export async function planTranslations({ existingByLang, translations, textFields, requiredOnCreate, slugTools, parentId, requireDefault = true, arrayFields = [] }) {
   const ops = [];
   const changes = {};
 
@@ -114,20 +116,20 @@ export async function planTranslations({ existingByLang, translations, textField
       const missing = requiredOnCreate.filter((f) => !t[f]);
       if (missing.length) throw invalid(`translations.${language}`, `${missing.join(" et ")} requis pour créer une traduction`);
       if (!slugTools) {
-        ops.push({ kind: "create", data: { language, ...pick(t, textFields) } });
+        ops.push({ kind: "create", data: { language, ...pick(t, textFields, arrayFields) } });
         changes[language] = "created";
         continue;
       }
       const slug = t.slug ?? (await slugTools.uniqueSlug(language, t.title, parentId));
       if (t.slug) await slugTools.assertSlugFree(language, slug, parentId);
-      ops.push({ kind: "create", data: { language, slug, ...pick(t, textFields) } });
+      ops.push({ kind: "create", data: { language, slug, ...pick(t, textFields, arrayFields) } });
       changes[language] = "created";
       continue;
     }
 
     const data = {};
     for (const key of textFields) {
-      if (key in t && (t[key] ?? null) !== (existing[key] ?? null)) data[key] = t[key] ?? null;
+      if (key in t && !sameText(t[key], existing[key])) data[key] = t[key] ?? (arrayFields.includes(key) ? [] : null);
     }
     if (slugTools && t.slug && t.slug !== existing.slug) {
       await slugTools.assertSlugFree(language, t.slug, parentId);

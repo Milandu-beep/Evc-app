@@ -12,6 +12,7 @@ import * as auditService from "../audit.service.js";
 const SOURCES = {
   events: { table: "events", entity: "events", event: "event.published", idKey: "eventId" },
   news: { table: "news", entity: "news", event: "news.published", idKey: "newsId" },
+  sermons: { table: "sermons", entity: "sermons", event: "sermon.published", idKey: "sermonId" },
   // La colonne de souhait de notification s'appelle sendNotification ; les messages portent aussi leur date.
   dailyMessages: {
     table: "daily_messages",
@@ -57,6 +58,7 @@ async function publishDue(source) {
 export const publishDueEvents = () => publishDue(SOURCES.events);
 export const publishDueNews = () => publishDue(SOURCES.news);
 export const publishDueDailyMessages = () => publishDue(SOURCES.dailyMessages);
+export const publishDueSermons = () => publishDue(SOURCES.sermons);
 
 let timer = null;
 let running = false;

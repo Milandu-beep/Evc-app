@@ -31,3 +31,12 @@ export const publicLimiter = rateLimit({
   handler: (req, res) =>
     sendError(res, "Trop de requêtes, réessayez plus tard", HTTP_STATUS.TOO_MANY_REQUESTS),
 });
+
+// Compteurs publics (vues, écoutes, téléchargements) : 120 par minute et par IP.
+export const counterLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: (req, res) => sendError(res, "Trop de requêtes, réessayez plus tard", HTTP_STATUS.TOO_MANY_REQUESTS),
+});

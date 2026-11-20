@@ -44,9 +44,11 @@ export const FOLDERS = Object.freeze({
   "news/gallery": ["image"],
   "daily-messages": ["image"],
   "sermons/audio": ["audio"],
+  "sermons/video": ["video"],
   "sermons/thumbnails": ["image"],
   "sermons/documents": ["pdf"],
   gallery: ["image", "video"],
+  people: ["image"], // photos de la table générique des personnes
   "profiles/pastors": ["image"],
   "profiles/admins": ["image"],
   "profiles/users": ["image"],

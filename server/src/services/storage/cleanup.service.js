@@ -16,6 +16,12 @@ const unreferenced = {
   media: { none: {} },
   galleryCovers: { none: {} },
   galleryItems: { none: {} },
+  peoplePhotos: { none: {} },
+  seriesCovers: { none: {} },
+  sermonCovers: { none: {} },
+  sermonAudios: { none: {} },
+  sermonVideos: { none: {} },
+  sermonDocuments: { none: {} },
 };
 
 /**

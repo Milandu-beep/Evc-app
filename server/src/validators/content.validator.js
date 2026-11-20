@@ -33,7 +33,7 @@ function translationValidators(lang, specs, { required, onlyIfPresent = false, s
   return rules;
 }
 
-const noUnknownLanguages = body("translations").custom((value) => {
+export const noUnknownLanguages = body("translations").custom((value) => {
   if (value === undefined) return true;
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("translations doit être un objet");
   const unknown = Object.keys(value).filter((k) => !LANGS.includes(k));

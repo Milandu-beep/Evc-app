@@ -34,6 +34,11 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 | `service_schedules` | Horaires de culte (`dayOfWeek` enum `Weekday`, `HH:mm`) | `service_schedule_translations` : libellé |
 | `gallery_albums` | Albums de la galerie : date, statut (brouillon / publié / archivé), mise en avant, ordre manuel (`sortOrder`), couverture, événement lié (`linkedEventId`) | `gallery_album_translations` : slug, titre, description |
 | `gallery_items` | Médias d'un album : fichier (`storage_files`), type `PHOTO` / `VIDEO`, `position`, `tags` (tableau, index GIN) | `gallery_item_translations` : titre, description, texte alternatif (tous facultatifs) |
+| `people` | **Table générique de personnes** (pasteurs, équipe, intervenants, responsables) : nom, `slug`, `categories` (`PersonCategory[]`, index GIN), ordre, photo, statut de la fiche | `person_translations` : titre, biographie |
+| `sermon_series` | Séries de prédications : statut, ordre, mise en avant, couverture | `sermon_series_translations` : slug, titre, description |
+| `sermons` | Prédications : date, série + numéro, audio (`audioFileId`), vidéo hébergée (`videoFileId`) **ou** lien YouTube (`youtubeId`), couverture, tags (GIN), statut (`SermonStatus`) + `publishAt`, compteurs `viewCount` / `playCount` / `downloadCount` | `sermon_translations` : slug, titre, description, thème, `verseReferences` (tableau, 10 au plus) |
+| `sermon_speakers` | **Intervenants** d'une prédication : personne + `SpeakerRole` (`PREACHER`, `GUEST_PREACHER`, `TRANSLATOR`, `WORSHIP_LEADER`, `MODERATOR`, `PRAYER`, `OTHER`) + ordre ; une personne peut avoir plusieurs rôles | — |
+| `sermon_documents` | Documents PDF d'accompagnement (ordre) | `sermon_document_translations` : titre |
 | `contact_messages` | Messages du formulaire Contact | — |
 | `audit_logs` | Journal d'audit (qui, quoi, quand, IP) | — |
 | `storage_files` | Métadonnées de chaque fichier hébergé (Cloudinary) : statut (`UPLOADING`, `READY`, `FAILED`, `DELETED`), `publicId`, `resourceType`, URLs du fournisseur, nom d'origine, type, taille, dimensions, durée, empreinte SHA-256, dossier logique | — |
@@ -75,6 +80,7 @@ chaque parent 1─n sa table de traductions                                     
   `media_folders(parent, nom)` (parmi les dossiers actifs).
 - `CHECK` sur `events` : `endsAt >= startsAt` ; `SCHEDULED` exige `publishAt` ; `registrationUrl` en `http(s)://`.
 - `CHECK` sur `events` : `capacity > 0` ; `registeredCount >= 0` et `<= capacity` ; `color` en `#rrggbb` ; `icon` en minuscules et tirets.
+- Prédications : `CHECK` — vidéo hébergée **ou** YouTube (pas les deux), identifiant YouTube de 11 caractères, compteurs ≥ 0, numéro de série ≥ 1, 20 tags et 10 versets au plus, programmée exige `publishAt` ; unicité `(sermonId, personId, role)` et `(sermonId, storageFileId)`.
 - Galerie : index unique partiel `gallery_items(albumId, storageFileId)` (un fichier par album actif) ; `CHECK` : `position >= 0`, 20 tags au plus, slug d'album valide.
 - `CHECK` sur `daily_messages` : `SCHEDULED` exige `publishAt` ; sur `daily_message_translations` : `estimatedReadingTime >= 1`.
 - `CHECK` sur `news` : `SCHEDULED` exige `publishAt` ; sur `news_translations.slug` : minuscules, chiffres et tirets.
@@ -89,6 +95,7 @@ chaque parent 1─n sa table de traductions                                     
 | `20261120091524_init_admins` | Table `admins`, enum `Role` |
 | `20261120092905_data_model` | 15 tables, enums, index, contraintes `CHECK`, RLS |
 | `20261120100000_db_hardening` | UUID, `deletedAt`, enum `Weekday`, table `audit_logs`, index partiel de la date des messages, RLS |
+| `20261120170000_sermons_and_people` | `people`, séries, prédications, intervenants avec rôle, documents (9 tables), enums `PersonCategory`, `SpeakerRole`, `SermonStatus`, index GIN (tags, catégories), contraintes `CHECK`, RLS |
 | `20261120160000_gallery` | Albums et médias de galerie (4 tables), enum `GalleryItemType`, index GIN sur les tags, index partiels (un fichier par album actif), contraintes `CHECK`, RLS |
 | `20261120150000_daily_messages` | Messages du jour : enum `DailyMessageStatus`, `publishAt`, `publishedAt`, `sendNotification` ; traductions : `verseReference` (ex-`bibleReference`), `verseText`, `theme`, `estimatedReadingTime`, `notificationTitle`, `notificationBody` ; contraintes `CHECK` |
 | `20261120140000_event_extras_and_news` | Événements : `EventType`, `capacity`, `registeredCount`, `color`, `icon` (contraintes `CHECK`) ; actualités : enum `NewsStatus`, `publishAt`, vedette, `notifyOnPublish`, index et contraintes (programmation, slug) |
