@@ -55,6 +55,26 @@ enum NotificationType {
   DAILY_MESSAGE
 }
 
+// Jour de la semaine (horaires de culte)
+enum Weekday {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// Actions tracées dans le journal d'audit
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+  LOGIN
+}
+
 enum NotificationStatus {
   DRAFT
   SCHEDULED
@@ -68,21 +88,23 @@ enum NotificationStatus {
 
 // Comptes d'administration (Super Admin et Admin). Pas d'inscription publique.
 model Admin {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email     String    @unique
   password  String
   firstName String
   lastName  String
-  role      Role     @default(ADMIN)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  role      Role      @default(ADMIN)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
+  updatedAt DateTime  @updatedAt
 
   events        Event[]
   news          News[]
   dailyMessages DailyMessage[]
   notifications Notification[]
   media         Media[]
+  auditLogs     AuditLog[]
 
   @@map("admins")
 }
@@ -92,29 +114,30 @@ model Admin {
 // ----------------------------------------------------------------------------
 
 model Event {
-  id          Int           @id @default(autoincrement())
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   status      PublishStatus @default(DRAFT)
   coverImage  String? // URL Supabase Storage
   startsAt    DateTime
   endsAt      DateTime?
   isFeatured  Boolean       @default(false)
-  createdById Int?
+  createdById String?       @db.Uuid
   createdAt   DateTime      @default(now())
+  deletedAt   DateTime?
   updatedAt   DateTime      @updatedAt
 
   createdBy     Admin?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
   translations  EventTranslation[]
   notifications Notification[]
 
-  @@index([status, startsAt])
+  @@index([status, startsAt, deletedAt])
   @@index([isFeatured])
   @@index([createdById])
   @@map("events")
 }
 
 model EventTranslation {
-  id          Int      @id @default(autoincrement())
-  eventId     Int
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId     String   @db.Uuid
   language    Language
   slug        String
   title       String
@@ -133,26 +156,27 @@ model EventTranslation {
 // ----------------------------------------------------------------------------
 
 model News {
-  id          Int           @id @default(autoincrement())
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   status      PublishStatus @default(DRAFT)
   coverImage  String?
   publishedAt DateTime? // renseignée à la publication
-  createdById Int?
+  createdById String?       @db.Uuid
   createdAt   DateTime      @default(now())
+  deletedAt   DateTime?
   updatedAt   DateTime      @updatedAt
 
   createdBy     Admin?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
   translations  NewsTranslation[]
   notifications Notification[]
 
-  @@index([status, publishedAt])
+  @@index([status, publishedAt, deletedAt])
   @@index([createdById])
   @@map("news")
 }
 
 model NewsTranslation {
-  id       Int      @id @default(autoincrement())
-  newsId   Int
+  id       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  newsId   String   @db.Uuid
   language Language
   slug     String
   title    String
@@ -171,25 +195,28 @@ model NewsTranslation {
 // ----------------------------------------------------------------------------
 
 model DailyMessage {
-  id          Int           @id @default(autoincrement())
-  date        DateTime      @unique @db.Date
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  date        DateTime      @db.Date
   status      PublishStatus @default(DRAFT)
-  createdById Int?
+  createdById String?       @db.Uuid
   createdAt   DateTime      @default(now())
+  deletedAt   DateTime?
   updatedAt   DateTime      @updatedAt
 
   createdBy     Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
   translations  DailyMessageTranslation[]
   notifications Notification[]
 
-  @@index([status, date])
+  // Unicité (date) WHERE deletedAt IS NULL : voir migration SQL (index partiel)
+  @@index([date])
+  @@index([status, date, deletedAt])
   @@index([createdById])
   @@map("daily_messages")
 }
 
 model DailyMessageTranslation {
-  id             Int      @id @default(autoincrement())
-  dailyMessageId Int
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dailyMessageId String   @db.Uuid
   language       Language
   title          String
   content        String
@@ -206,7 +233,7 @@ model DailyMessageTranslation {
 // ----------------------------------------------------------------------------
 
 model Notification {
-  id             Int                @id @default(autoincrement())
+  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   type           NotificationType   @default(GENERAL)
   status         NotificationStatus @default(DRAFT)
   scheduledAt    DateTime?
@@ -214,11 +241,12 @@ model Notification {
   oneSignalId    String? // identifiant retourné par OneSignal après envoi
   errorMessage   String?
   // Contenu associé (facultatif) : permet d'ouvrir la bonne page depuis la notification
-  eventId        Int?
-  newsId         Int?
-  dailyMessageId Int?
-  createdById    Int?
+  eventId        String?            @db.Uuid
+  newsId         String?            @db.Uuid
+  dailyMessageId String?            @db.Uuid
+  createdById    String?            @db.Uuid
   createdAt      DateTime           @default(now())
+  deletedAt      DateTime?
   updatedAt      DateTime           @updatedAt
 
   createdBy    Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -227,7 +255,7 @@ model Notification {
   dailyMessage DailyMessage?             @relation(fields: [dailyMessageId], references: [id], onDelete: SetNull)
   translations NotificationTranslation[]
 
-  @@index([status, scheduledAt])
+  @@index([status, scheduledAt, deletedAt])
   @@index([createdById])
   @@index([eventId])
   @@index([newsId])
@@ -236,8 +264,8 @@ model Notification {
 }
 
 model NotificationTranslation {
-  id             Int      @id @default(autoincrement())
-  notificationId Int
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationId String   @db.Uuid
   language       Language
   title          String
   message        String
@@ -253,7 +281,7 @@ model NotificationTranslation {
 // ----------------------------------------------------------------------------
 
 model Media {
-  id           Int           @id @default(autoincrement())
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   type         MediaType
   status       PublishStatus @default(DRAFT)
   // Fichier stocké (IMAGE / PDF / AUDIO) : chemin dans le bucket + URL publique
@@ -262,21 +290,22 @@ model Media {
   youtubeId    String? // identifiant de la vidéo (type YOUTUBE)
   mimeType     String?
   sizeBytes    Int?
-  uploadedById Int?
+  uploadedById String?       @db.Uuid
   createdAt    DateTime      @default(now())
+  deletedAt    DateTime?
   updatedAt    DateTime      @updatedAt
 
   uploadedBy   Admin?             @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
   translations MediaTranslation[]
 
-  @@index([type, status, createdAt])
+  @@index([type, status, createdAt, deletedAt])
   @@index([uploadedById])
   @@map("media")
 }
 
 model MediaTranslation {
-  id          Int      @id @default(autoincrement())
-  mediaId     Int
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  mediaId     String   @db.Uuid
   language    Language
   title       String
   description String?
@@ -308,7 +337,7 @@ model ChurchSetting {
 }
 
 model ChurchSettingTranslation {
-  id               Int      @id @default(autoincrement())
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   settingId        Int
   language         Language
   slogan           String?
@@ -322,11 +351,11 @@ model ChurchSettingTranslation {
   @@map("church_setting_translations")
 }
 
-// Horaires de culte. dayOfWeek : 0 = dimanche … 6 = samedi.
+// Horaires de culte.
 // startTime / endTime au format "HH:mm" (validé par l'application).
 model ServiceSchedule {
-  id        Int      @id @default(autoincrement())
-  dayOfWeek Int
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  dayOfWeek Weekday
   startTime String
   endTime   String
   isActive  Boolean  @default(true)
@@ -340,8 +369,8 @@ model ServiceSchedule {
 }
 
 model ServiceScheduleTranslation {
-  id         Int      @id @default(autoincrement())
-  scheduleId Int
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scheduleId String   @db.Uuid
   language   Language
   label      String // ex. « Culte du dimanche »
 
@@ -356,14 +385,38 @@ model ServiceScheduleTranslation {
 // ----------------------------------------------------------------------------
 
 model ContactMessage {
-  id        Int      @id @default(autoincrement())
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String
   email     String
   subject   String?
   message   String
-  isRead    Boolean  @default(false)
-  createdAt DateTime @default(now())
+  isRead    Boolean   @default(false)
+  createdAt DateTime  @default(now())
+  deletedAt DateTime?
 
-  @@index([isRead, createdAt])
+  @@index([isRead, createdAt, deletedAt])
   @@map("contact_messages")
+}
+
+// ----------------------------------------------------------------------------
+// Journal d'audit : qui a fait quoi, sur quelle ressource (jamais modifié par le code)
+// ----------------------------------------------------------------------------
+
+model AuditLog {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminId   String?     @db.Uuid
+  action    AuditAction
+  entity    String // nom de la table concernée, ex. "events"
+  entityId  String? // identifiant de la ressource (UUID)
+  changes   Json? // résumé des champs modifiés (jamais de mot de passe)
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime    @default(now())
+
+  admin Admin? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([adminId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
 }

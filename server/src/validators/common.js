@@ -2,7 +2,7 @@ import { param, query } from "express-validator";
 
 // Règles réutilisables par les futurs validators métier.
 export const idParam = (name = "id") =>
-  param(name).isInt({ min: 1 }).withMessage(`${name} doit être un entier positif`).toInt();
+  param(name).isUUID().withMessage(`${name} doit être un UUID valide`);
 
 export const paginationQuery = [
   query("page").optional().isInt({ min: 1 }).withMessage("page invalide").toInt(),
