@@ -58,7 +58,7 @@ curl -X POST http://localhost:3000/api/storage/upload \
 Réponse 201 (extrait) :
 ```json
 { "success": true, "message": "Fichier envoyé", "data": {
-  "id": "…", "folder": "events/covers", "originalFilename": "affiche.jpg",
+  "id": "…", "status": "READY", "folder": "events/covers", "originalFilename": "affiche.jpg",
   "mimeType": "image/jpeg", "resourceType": "IMAGE", "bytes": 184233, "width": 1600, "height": 900,
   "url": "https://res.cloudinary.com/…/image/upload/f_auto,q_auto/EVC/events/covers/…",
   "thumbnailUrl": "https://res.cloudinary.com/…/c_limit,w_400/…", "reused": false } }
@@ -107,8 +107,14 @@ pour mémoire ; l'API n'expose que des URL HTTPS calculées.
 
 ## 6. Cycle de vie et nettoyage
 
+Chaque fichier a un statut : `UPLOADING` (envoi en cours) → `READY` (utilisable) ou `FAILED`
+(envoi échoué ou interrompu) ; `DELETED` pour un orphelin marqué par le nettoyage.
+Après une coupure ou une erreur, **renvoyez simplement le fichier** : un envoi échoué ne bloque
+jamais un nouvel envoi. Si la réponse est 409 « envoi identique en cours », patientez un instant.
+Un envoi resté `UPLOADING` plus d'une heure est déclaré `FAILED` par le nettoyage.
+
 - Supprimer un contenu **ne supprime pas** son fichier (il peut servir ailleurs).
-- Un fichier qui n'est utilisé nulle part est **orphelin** : marqué après 24 h, supprimé
+- Un fichier `READY` qui n'est utilisé nulle part est **orphelin** : marqué `DELETED` après 24 h, supprimé
   définitivement (chez le fournisseur puis en base) après 30 jours.
 - Les fichiers ne sont jamais déplacés : un fichier envoyé dans `temporary` et rattaché
   ensuite à un contenu garde sa clé.

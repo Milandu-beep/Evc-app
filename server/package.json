@@ -8,7 +8,8 @@
     "start": "node src/server.js",
     "seed": "node prisma/seed.js",
     "storage:cleanup": "node scripts/storage-cleanup.js",
-    "test:storage": "node tests/storage.stub.test.mjs"
+    "test:storage": "node tests/storage.stub.test.mjs",
+    "test:storage:cloudinary": "node tests/storage.cloudinary.test.mjs"
   },
   "keywords": [],
   "author": "",

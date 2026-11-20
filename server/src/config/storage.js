@@ -62,6 +62,8 @@ export const DEFAULT_PROVIDER = "CLOUDINARY";
 export const CLEANUP = Object.freeze({
   orphanGraceHours: 24, // un fichier non rattaché n'est marqué qu'après ce délai
   retentionDays: 30, // un fichier marqué n'est supprimé définitivement qu'après ce délai
+  stuckUploadMinutes: 60, // un envoi (UPLOADING) plus ancien est considéré interrompu -> FAILED
+  failedRetentionDays: 7, // une ligne FAILED est supprimée après ce délai
 });
 
 // Vignettes (largeur en px) servies par urlFor().

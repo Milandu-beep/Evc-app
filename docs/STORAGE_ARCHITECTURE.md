@@ -1,6 +1,6 @@
 # Architecture du stockage
 
-Version : 3.1 — Statut : **implémenté (Sprint 3) ; test réel Cloudinary en attente d'une clé API valide**
+Version : 3.2 — Statut : **implémenté et testé sur Cloudinary (Sprint 3)**
 Références : `PROJECT_CHARTER.md` §5 (Stockage) et §10 (Médiathèque).
 
 ## 1. Principes
@@ -104,19 +104,38 @@ publicId = {racine}/{dossier}/{AAAA}/{MM}/{JJ}/{uuid}.{ext}  ex. EVC/events/docu
 ```
 1. Authentification + rôle (Admin ou Super Admin) + limitation de débit
 2. Validation de la demande : dossier logique autorisé pour ce type (§3)
-   Réception (Multer → fichier temporaire dans src/uploads/, supprimé dans tous les cas)
+   Réception (Multer → fichier temporaire dans src/uploads/tmp/, supprimé dans tous les cas)
 3. Détection du type réel, contrôle du format et de la taille
 4. Traitement (image : rotation + EXIF + dimensions)
 5. Empreinte SHA-256
-   └─ fichier actif identique (même empreinte) → réutilisation, pas de doublon
-6. Envoi à Cloudinary avec le bon resource_type (§2)
-7. Création de la ligne storage_files  (si la base échoue → suppression chez Cloudinary)
-8. Audit : action UPLOAD_FILE (entité storage_files) ; chaque suppression écrit DELETE_FILE
+   └─ fichier READY identique → réutilisation (200, reused: true), rien n'est renvoyé
+6. Création de la ligne storage_files, statut UPLOADING (avant l'envoi)
+   └─ empreinte déjà réservée : READY → réutilisé ; UPLOADING → 409 « envoi identique en cours »
+7. Envoi à Cloudinary avec le bon resource_type (§2)
+   └─ échec → statut FAILED, l'erreur est renvoyée (502)
+8. Statut READY + URL, dimensions, durée du fournisseur
+   └─ échec base → objet supprimé chez Cloudinary, statut FAILED
+9. Audit : UPLOAD_FILE ; chaque suppression écrit DELETE_FILE
 ```
 
-Il n'y a pas de transaction commune entre la base et le fournisseur : l'ordre « fournisseur
-d'abord, base ensuite, nettoyage en cas d'échec » garantit qu'on ne référence jamais un
-objet absent. L'inverse (objet sans ligne) est couvert par le nettoyage du §7.
+### Statuts d'un fichier (`storage_files.status`)
+
+| Statut | Signification |
+|---|---|
+| `UPLOADING` | Ligne créée, envoi en cours. Réserve l'empreinte (pas de doublon simultané) |
+| `READY` | Envoyé et enregistré : seul état utilisable par un contenu |
+| `FAILED` | Envoi échoué ou interrompu. Ne bloque pas un nouvel envoi du même fichier |
+| `DELETED` | Marqué par le nettoyage (orphelin), en attente de suppression définitive (`deletedAt`) |
+
+Une coupure, un plantage du serveur ou une erreur Cloudinary laissent donc une **trace**
+(`UPLOADING` puis `FAILED`) au lieu d'un fichier au statut inconnu. La **reprise automatique**
+d'un envoi n'est pas faite : le fichier temporaire ne survit pas à la requête. Le client renvoie
+simplement le fichier, ce qui fonctionne puisqu'un envoi `FAILED` ne réserve plus rien.
+Un envoi resté `UPLOADING` plus d'une heure est considéré interrompu par le nettoyage (§7).
+
+Il n'y a pas de transaction commune entre la base et le fournisseur : l'ordre « ligne
+UPLOADING d'abord, fournisseur ensuite, statut final enfin » garantit qu'aucun objet n'existe
+sans suivi en base.
 
 ## 6. URLs et CDN
 
@@ -143,7 +162,9 @@ https://res.cloudinary.com/{cloud}/{resource_type}/upload/{transformations}/{pub
 - Un fichier est **orphelin** s'il n'est référencé par aucune table (`events`, `news`,
   `daily_messages`, `media`, `church_settings`).
 - Nettoyage (`npm run storage:cleanup`, planifiable) :
-  1. Orphelins de plus de **24 h** → marqués `deletedAt`.
+  0. Envois `UPLOADING` de plus d'**1 h** → objet éventuel supprimé, statut `FAILED` ; lignes `FAILED`
+     de plus de **7 jours** → supprimées.
+  1. Fichiers `READY` orphelins de plus de **24 h** → statut `DELETED` + `deletedAt`.
   2. Fichiers marqués depuis plus de **30 jours** → supprimés chez Cloudinary (`destroy` avec
      le bon `resource_type` et invalidation du cache), puis de la base.
   3. Objets présents chez Cloudinary sans ligne en base (échec entre les étapes 6 et 7)
@@ -159,16 +180,17 @@ https://res.cloudinary.com/{cloud}/{resource_type}/upload/{transformations}/{pub
 ```
 storage_files
   id (uuid) · provider (enum StorageProvider : CLOUDINARY, R2)
+  status (enum StorageFileStatus : UPLOADING, READY, FAILED, DELETED)
   publicId (identifiant chez le fournisseur : sert à supprimer et à construire les URLs)
   resourceType (enum StorageResourceType : IMAGE, VIDEO, RAW)
-  url · secureUrl (adresses brutes renvoyées par le fournisseur, conservées pour mémoire)
+  url? · secureUrl? (adresses brutes du fournisseur, renseignées à READY, conservées pour mémoire)
   folder (dossier logique, ex. « events/covers »)
   originalFilename · mimeType · bytes · width? · height? · duration? (secondes)
   checksum (SHA-256)
   createdById? → admins (SET NULL) · createdAt · deletedAt?
   unique (provider, resourceType, publicId)
-  unique partiel (provider, resourceType, checksum) WHERE deletedAt IS NULL   -- dédoublonnage
-  index (checksum)    index (folder)    index (deletedAt)
+  unique partiel (provider, resourceType, checksum) WHERE deletedAt IS NULL AND status IN (UPLOADING, READY)   -- dédoublonnage
+  index (checksum)    index (folder)    index (deletedAt)    index (status, createdAt)
 
 media_folders
   id (uuid) · name · parentId? → media_folders (arborescence)

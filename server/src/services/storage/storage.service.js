@@ -78,6 +78,7 @@ export function toDto(file, extra = {}) {
     (file.resourceType === "VIDEO" && !file.mimeType.startsWith("audio/"));
   return {
     id: file.id,
+    status: file.status,
     folder: file.folder,
     originalFilename: file.originalFilename,
     mimeType: file.mimeType,
@@ -142,19 +143,19 @@ export async function upload({ file, folder, req }) {
       }
     }
 
-    // 5. Empreinte et dédoublonnage
+    // 5. Empreinte et dédoublonnage : seul un fichier prêt (READY) est réutilisable
     const provider = getProvider();
     const checksum = await sha256File(file.path);
     const bytes = (await stat(file.path)).size;
-    const existing = await prisma.storageFile.findFirst({
-      where: { provider: provider.name, resourceType: kindDef.resourceType, checksum },
-    });
+    const identity = { provider: provider.name, resourceType: kindDef.resourceType, checksum };
+    const existing = await prisma.storageFile.findFirst({ where: { ...identity, status: "READY" } });
     if (existing) {
       await auditUpload(req, existing, { reused: true });
       return { file: existing, reused: true };
     }
 
-    // 6. Envoi au fournisseur
+    // 6. La ligne est créée AVANT l'envoi (statut UPLOADING) : une interruption (coupure,
+    //    plantage du serveur) laisse une trace que le nettoyage sait traiter.
     const id = randomUUID();
     const publicId = buildPublicId({
       folder,
@@ -162,50 +163,73 @@ export async function upload({ file, folder, req }) {
       resourceType: kindDef.resourceType,
       ext: detected.ext,
     });
-    const sent = await provider.put({
-      path: file.path,
-      publicId,
-      resourceType: kindDef.resourceType,
-      bytes,
-    });
-
-    // 7. Enregistrement en base ; en cas d'échec, l'objet envoyé est supprimé
-    let record;
     try {
-      record = await prisma.storageFile.create({
+      await prisma.storageFile.create({
         data: {
           id,
           provider: provider.name,
-          publicId: sent.publicId,
+          status: "UPLOADING",
+          publicId,
           resourceType: kindDef.resourceType,
-          url: sent.url,
-          secureUrl: sent.secureUrl,
           folder,
           originalFilename: sanitizeFilename(file.originalname),
           mimeType: detected.mime,
           bytes,
+          width: width ?? null,
+          height: height ?? null,
+          checksum,
+          createdById: req?.user?.id ?? null,
+        },
+      });
+    } catch (err) {
+      // Empreinte déjà réservée : un envoi identique est en cours, ou vient de se terminer.
+      if (err.code === "P2002") {
+        const other = await prisma.storageFile.findFirst({
+          where: { ...identity, status: { in: ["UPLOADING", "READY"] } },
+        });
+        if (other?.status === "READY") {
+          await auditUpload(req, other, { reused: true });
+          return { file: other, reused: true };
+        }
+        throw new AppError("Un envoi identique est déjà en cours, réessayez dans un instant", HTTP_STATUS.CONFLICT);
+      }
+      throw err;
+    }
+
+    // 7. Envoi au fournisseur
+    let sent;
+    try {
+      sent = await provider.put({
+        path: file.path,
+        publicId,
+        resourceType: kindDef.resourceType,
+        bytes,
+      });
+    } catch (err) {
+      await markFailed(id);
+      throw err;
+    }
+
+    // 8. Fichier prêt ; si la base échoue ici, l'objet envoyé est supprimé (jamais d'objet sans suivi)
+    let record;
+    try {
+      record = await prisma.storageFile.update({
+        where: { id },
+        data: {
+          status: "READY",
+          publicId: sent.publicId,
+          url: sent.url,
+          secureUrl: sent.secureUrl,
           width: sent.width ?? width ?? null,
           height: sent.height ?? height ?? null,
           duration: sent.duration ?? null,
-          checksum,
-          createdById: req?.user?.id ?? null,
         },
       });
     } catch (err) {
       await provider
         .destroy({ publicId: sent.publicId, resourceType: kindDef.resourceType })
         .catch((e) => logger.error("Objet orphelin après échec base", { publicId: sent.publicId, e: e.message }));
-
-      // Deux envois identiques simultanés : l'autre a gagné, on réutilise son fichier.
-      if (err.code === "P2002") {
-        const winner = await prisma.storageFile.findFirst({
-          where: { provider: provider.name, resourceType: kindDef.resourceType, checksum },
-        });
-        if (winner) {
-          await auditUpload(req, winner, { reused: true });
-          return { file: winner, reused: true };
-        }
-      }
+      await markFailed(id);
       throw err;
     }
 
@@ -215,6 +239,12 @@ export async function upload({ file, folder, req }) {
     await Promise.all(tempPaths.map(safeUnlink));
   }
 }
+
+// Marque l'envoi comme échoué (ne fait jamais échouer l'appelant : l'erreur d'origine prime).
+const markFailed = (id) =>
+  prismaRaw.storageFile
+    .update({ where: { id }, data: { status: "FAILED" } })
+    .catch((e) => logger.error(`Statut FAILED non enregistré pour ${id}`, e.message));
 
 const auditUpload = (req, file, { reused }) =>
   auditService.record({
@@ -255,6 +285,9 @@ export async function countReferences(fileId) {
 export async function remove({ id, req }) {
   const file = await prisma.storageFile.findUnique({ where: { id } });
   if (!file) throw new AppError("Fichier introuvable", HTTP_STATUS.NOT_FOUND);
+  if (file.status === "UPLOADING") {
+    throw new AppError("Envoi en cours : réessayez dans un instant", HTTP_STATUS.CONFLICT);
+  }
 
   const refs = await countReferences(id);
   if (refs.total > 0) {

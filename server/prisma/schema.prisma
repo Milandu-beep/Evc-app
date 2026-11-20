@@ -62,6 +62,15 @@ enum StorageProvider {
   R2
 }
 
+// Cycle de vie d'un fichier : UPLOADING (ligne créée, envoi en cours) -> READY (utilisable)
+// ou FAILED (envoi interrompu ou échoué). DELETED = marqué par le nettoyage (deletedAt posé).
+enum StorageFileStatus {
+  UPLOADING
+  READY
+  FAILED
+  DELETED
+}
+
 // Type de ressource chez le fournisseur (Cloudinary : image / video / raw ; l'audio est « video »)
 enum StorageResourceType {
   IMAGE
@@ -458,10 +467,11 @@ model AuditLog {
 model StorageFile {
   id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   provider         StorageProvider
+  status           StorageFileStatus   @default(UPLOADING)
   publicId         String // identifiant chez le fournisseur : sert à supprimer et à construire les URLs
   resourceType     StorageResourceType
-  url              String // URL telle que renvoyée par le fournisseur (instantané)
-  secureUrl        String // URL HTTPS telle que renvoyée par le fournisseur (instantané)
+  url              String? // URL telle que renvoyée par le fournisseur (instantané)
+  secureUrl        String? // URL HTTPS telle que renvoyée par le fournisseur (instantané)
   folder           String // dossier logique, ex. « events/covers » (voir config/storage.js)
   originalFilename String // nom d'origine, ex. « Guide Baptême.pdf »
   mimeType         String
@@ -485,6 +495,7 @@ model StorageFile {
   @@index([checksum])
   @@index([folder])
   @@index([deletedAt])
+  @@index([status, createdAt])
   @@index([createdById])
   @@map("storage_files")
 }

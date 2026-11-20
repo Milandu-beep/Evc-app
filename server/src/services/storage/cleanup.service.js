@@ -18,6 +18,8 @@ const unreferenced = {
 
 /**
  * Nettoyage des fichiers orphelins (docs/STORAGE_ARCHITECTURE.md §7).
+ *  0. Envoi resté UPLOADING depuis plus d'1 h (interrompu) -> objet éventuel supprimé, statut FAILED ;
+ *     ligne FAILED depuis plus de 7 jours -> supprimée.
  *  1. Fichier non rattaché depuis plus de 24 h  -> marqué (deletedAt).
  *  2. Fichier marqué depuis plus de 30 jours    -> supprimé chez le fournisseur puis en base.
  *  3. remote : objet chez le fournisseur sans ligne en base (créé il y a plus de 24 h) -> supprimé.
@@ -25,11 +27,38 @@ const unreferenced = {
  * Une erreur sur un fichier est loggée et n'arrête pas le reste.
  */
 export async function cleanupOrphans({ dryRun = false, remote = false, now = new Date() } = {}) {
-  const report = { marked: 0, purged: 0, remoteDeleted: 0, errors: 0, dryRun };
+  const report = { stuckFailed: 0, failedPurged: 0, marked: 0, purged: 0, remoteDeleted: 0, errors: 0, dryRun };
+
+  // 0. Envois interrompus et lignes en échec
+  const stuck = await prismaRaw.storageFile.findMany({
+    where: { status: "UPLOADING", createdAt: { lt: new Date(now - CLEANUP.stuckUploadMinutes * 60 * 1000) } },
+  });
+  for (const file of stuck) {
+    report.stuckFailed += 1;
+    if (dryRun) continue;
+    try {
+      // L'objet a pu être envoyé juste avant l'interruption : on tente de le supprimer.
+      await getProvider(file.provider).destroy({ publicId: file.publicId, resourceType: file.resourceType });
+      await prismaRaw.storageFile.update({ where: { id: file.id }, data: { status: "FAILED" } });
+    } catch (err) {
+      report.stuckFailed -= 1;
+      report.errors += 1;
+      logger.error(`Nettoyage : envoi interrompu ${file.id} non traité`, err.message);
+    }
+  }
+  const failed = await prismaRaw.storageFile.findMany({
+    where: { status: "FAILED", createdAt: { lt: new Date(now - CLEANUP.failedRetentionDays * DAY) } },
+    select: { id: true },
+  });
+  report.failedPurged = failed.length;
+  if (!dryRun && failed.length) {
+    await prismaRaw.storageFile.deleteMany({ where: { id: { in: failed.map((f) => f.id) } } });
+  }
 
   // 1. Marquage
   const toMark = await prismaRaw.storageFile.findMany({
     where: {
+      status: "READY",
       deletedAt: null,
       createdAt: { lt: new Date(now - CLEANUP.orphanGraceHours * HOUR) },
       ...unreferenced,
@@ -40,13 +69,13 @@ export async function cleanupOrphans({ dryRun = false, remote = false, now = new
   if (!dryRun && toMark.length) {
     await prismaRaw.storageFile.updateMany({
       where: { id: { in: toMark.map((f) => f.id) } },
-      data: { deletedAt: now },
+      data: { status: "DELETED", deletedAt: now },
     });
   }
 
   // 2. Suppression définitive (un fichier remis en usage entre-temps n'est jamais supprimé)
   const toPurge = await prismaRaw.storageFile.findMany({
-    where: { deletedAt: { lt: new Date(now - CLEANUP.retentionDays * DAY) }, ...unreferenced },
+    where: { status: "DELETED", deletedAt: { lt: new Date(now - CLEANUP.retentionDays * DAY) }, ...unreferenced },
   });
   for (const file of toPurge) {
     if (dryRun) {
