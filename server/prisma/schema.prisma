@@ -1,3 +1,15 @@
+// =============================================================================
+// EVC APP — Schéma de données (Sprint 2)
+//
+// Conventions
+//  - Tables en snake_case pluriel (@@map), modèles en PascalCase.
+//  - Contenu public multilingue (charte §9) : une table parente (données
+//    indépendantes de la langue) + une table *Translation (une ligne par langue).
+//  - Statut éditorial commun : PublishStatus (DRAFT / PUBLISHED / ARCHIVED).
+//  - Suppression : les traductions suivent leur parent (Cascade) ; les liens vers
+//    Admin sont SetNull pour ne jamais perdre un contenu si un compte est supprimé.
+// =============================================================================
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -6,11 +18,53 @@ datasource db {
   provider = "postgresql"
 }
 
-// Rôles de la charte (section 4)
+// ----------------------------------------------------------------------------
+// Enums
+// ----------------------------------------------------------------------------
+
+// Rôles de la charte (§4)
 enum Role {
   SUPER_ADMIN
   ADMIN
 }
+
+// Langues de la charte (§9). Valeurs identiques à LANGUAGES dans config/constants.js.
+enum Language {
+  fr
+  en
+}
+
+enum PublishStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// Formats de la médiathèque (charte §10)
+enum MediaType {
+  IMAGE
+  PDF
+  AUDIO
+  YOUTUBE
+}
+
+enum NotificationType {
+  GENERAL
+  EVENT
+  NEWS
+  DAILY_MESSAGE
+}
+
+enum NotificationStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+  FAILED
+}
+
+// ----------------------------------------------------------------------------
+// Utilisateurs
+// ----------------------------------------------------------------------------
 
 // Comptes d'administration (Super Admin et Admin). Pas d'inscription publique.
 model Admin {
@@ -24,5 +78,292 @@ model Admin {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  events        Event[]
+  news          News[]
+  dailyMessages DailyMessage[]
+  notifications Notification[]
+  media         Media[]
+
   @@map("admins")
+}
+
+// ----------------------------------------------------------------------------
+// Événements
+// ----------------------------------------------------------------------------
+
+model Event {
+  id          Int           @id @default(autoincrement())
+  status      PublishStatus @default(DRAFT)
+  coverImage  String? // URL Supabase Storage
+  startsAt    DateTime
+  endsAt      DateTime?
+  isFeatured  Boolean       @default(false)
+  createdById Int?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  createdBy     Admin?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations  EventTranslation[]
+  notifications Notification[]
+
+  @@index([status, startsAt])
+  @@index([isFeatured])
+  @@index([createdById])
+  @@map("events")
+}
+
+model EventTranslation {
+  id          Int      @id @default(autoincrement())
+  eventId     Int
+  language    Language
+  slug        String
+  title       String
+  description String
+  location    String?
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, language])
+  @@unique([language, slug])
+  @@map("event_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Actualités
+// ----------------------------------------------------------------------------
+
+model News {
+  id          Int           @id @default(autoincrement())
+  status      PublishStatus @default(DRAFT)
+  coverImage  String?
+  publishedAt DateTime? // renseignée à la publication
+  createdById Int?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  createdBy     Admin?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations  NewsTranslation[]
+  notifications Notification[]
+
+  @@index([status, publishedAt])
+  @@index([createdById])
+  @@map("news")
+}
+
+model NewsTranslation {
+  id       Int      @id @default(autoincrement())
+  newsId   Int
+  language Language
+  slug     String
+  title    String
+  excerpt  String?
+  content  String
+
+  news News @relation(fields: [newsId], references: [id], onDelete: Cascade)
+
+  @@unique([newsId, language])
+  @@unique([language, slug])
+  @@map("news_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Messages quotidiens (un par jour)
+// ----------------------------------------------------------------------------
+
+model DailyMessage {
+  id          Int           @id @default(autoincrement())
+  date        DateTime      @unique @db.Date
+  status      PublishStatus @default(DRAFT)
+  createdById Int?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  createdBy     Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations  DailyMessageTranslation[]
+  notifications Notification[]
+
+  @@index([status, date])
+  @@index([createdById])
+  @@map("daily_messages")
+}
+
+model DailyMessageTranslation {
+  id             Int      @id @default(autoincrement())
+  dailyMessageId Int
+  language       Language
+  title          String
+  content        String
+  bibleReference String? // ex. « Jean 3:16 »
+
+  dailyMessage DailyMessage @relation(fields: [dailyMessageId], references: [id], onDelete: Cascade)
+
+  @@unique([dailyMessageId, language])
+  @@map("daily_message_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Notifications (envoi via OneSignal)
+// ----------------------------------------------------------------------------
+
+model Notification {
+  id             Int                @id @default(autoincrement())
+  type           NotificationType   @default(GENERAL)
+  status         NotificationStatus @default(DRAFT)
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  oneSignalId    String? // identifiant retourné par OneSignal après envoi
+  errorMessage   String?
+  // Contenu associé (facultatif) : permet d'ouvrir la bonne page depuis la notification
+  eventId        Int?
+  newsId         Int?
+  dailyMessageId Int?
+  createdById    Int?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  createdBy    Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  event        Event?                    @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  news         News?                     @relation(fields: [newsId], references: [id], onDelete: SetNull)
+  dailyMessage DailyMessage?             @relation(fields: [dailyMessageId], references: [id], onDelete: SetNull)
+  translations NotificationTranslation[]
+
+  @@index([status, scheduledAt])
+  @@index([createdById])
+  @@index([eventId])
+  @@index([newsId])
+  @@index([dailyMessageId])
+  @@map("notifications")
+}
+
+model NotificationTranslation {
+  id             Int      @id @default(autoincrement())
+  notificationId Int
+  language       Language
+  title          String
+  message        String
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, language])
+  @@map("notification_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Médiathèque : images, PDF, MP3 (Supabase Storage) et vidéos YouTube
+// ----------------------------------------------------------------------------
+
+model Media {
+  id           Int           @id @default(autoincrement())
+  type         MediaType
+  status       PublishStatus @default(DRAFT)
+  // Fichier stocké (IMAGE / PDF / AUDIO) : chemin dans le bucket + URL publique
+  storagePath  String?
+  url          String? // URL publique du fichier, ou URL YouTube pour type YOUTUBE
+  youtubeId    String? // identifiant de la vidéo (type YOUTUBE)
+  mimeType     String?
+  sizeBytes    Int?
+  uploadedById Int?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  uploadedBy   Admin?             @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  translations MediaTranslation[]
+
+  @@index([type, status, createdAt])
+  @@index([uploadedById])
+  @@map("media")
+}
+
+model MediaTranslation {
+  id          Int      @id @default(autoincrement())
+  mediaId     Int
+  language    Language
+  title       String
+  description String?
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, language])
+  @@map("media_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Paramètres de l'église (une seule ligne, id = 1) et horaires
+// ----------------------------------------------------------------------------
+
+model ChurchSetting {
+  id          Int      @id @default(1)
+  name        String   @default("Église Vie Céleste")
+  email       String?
+  phone       String?
+  whatsapp    String?
+  facebookUrl String?
+  youtubeUrl  String?
+  tiktokUrl   String?
+  updatedAt   DateTime @updatedAt
+
+  translations ChurchSettingTranslation[]
+
+  @@map("church_settings")
+}
+
+model ChurchSettingTranslation {
+  id               Int      @id @default(autoincrement())
+  settingId        Int
+  language         Language
+  slogan           String?
+  mission          String?
+  address          String?
+  addressReference String? // repères (croisement d'avenues, point de repère…)
+
+  setting ChurchSetting @relation(fields: [settingId], references: [id], onDelete: Cascade)
+
+  @@unique([settingId, language])
+  @@map("church_setting_translations")
+}
+
+// Horaires de culte. dayOfWeek : 0 = dimanche … 6 = samedi.
+// startTime / endTime au format "HH:mm" (validé par l'application).
+model ServiceSchedule {
+  id        Int      @id @default(autoincrement())
+  dayOfWeek Int
+  startTime String
+  endTime   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  translations ServiceScheduleTranslation[]
+
+  @@index([dayOfWeek, startTime])
+  @@map("service_schedules")
+}
+
+model ServiceScheduleTranslation {
+  id         Int      @id @default(autoincrement())
+  scheduleId Int
+  language   Language
+  label      String // ex. « Culte du dimanche »
+
+  schedule ServiceSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleId, language])
+  @@map("service_schedule_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Formulaire de contact (page publique « Contact »)
+// ----------------------------------------------------------------------------
+
+model ContactMessage {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  subject   String?
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([isRead, createdAt])
+  @@map("contact_messages")
 }
