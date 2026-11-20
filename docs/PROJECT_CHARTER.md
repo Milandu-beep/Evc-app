@@ -1,6 +1,7 @@
 # EVC APP - PROJECT CHARTER
-Version : 1.0
+Version : 1.1
 Statut : Validé
+Historique : 1.1 (2026-11-20) — stockage migré vers Cloudflare R2 ; roadmap révisée (Sprints 2.5 et 3 à 12)
 Projet : Plateforme officielle de l'Église Vie Céleste (EVC)
 
 ---
@@ -96,7 +97,9 @@ OneSignal
 
 ## Stockage
 
-Supabase Storage
+Cloudflare R2 (voir docs/STORAGE_ARCHITECTURE.md)
+
+Supabase ne stocke jamais de fichiers : uniquement les métadonnées.
 
 ---
 
@@ -281,43 +284,33 @@ Supabase
 
 # 16. Roadmap
 
-Sprint 1
+Sprint 1 — Fondation (backend, authentification, base de données) ✅
 
-- Backend
-- Authentification
-- Base de données
+Sprint 2 — Modèle de données ✅
 
-Sprint 2
+Sprint 2.5 — Durcissement de la base (UUID, suppression logique, audit) ✅
 
-- Dashboard
+Sprint 3 — Stockage Cloudflare R2
 
-Sprint 3
+Sprint 4 — Authentification avancée (permissions, rafraîchissement des tokens)
 
-- Événements
+Sprint 5 — Événements
 
-Sprint 4
+Sprint 6 — Actualités
 
-- Actualités
+Sprint 7 — Messages quotidiens
 
-Sprint 5
+Sprint 8 — Médiathèque
 
-- Messages quotidiens
+Sprint 9 — Notifications (OneSignal)
 
-Sprint 6
+Sprint 10 — Dashboard
 
-- Notifications
+Sprint 11 — Site public
 
-Sprint 7
+Sprint 12 — PWA
 
-- Médiathèque
-
-Sprint 8
-
-- PWA
-
-Sprint 9
-
-- Déploiement
+Déploiement : fin du Sprint 12 (Vercel, Railway ou VPS, Supabase, Cloudflare R2).
 
 ---
 
