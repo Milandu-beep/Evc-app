@@ -86,3 +86,10 @@ export const TRANSITIONS = Object.freeze({
 });
 
 export const canTransition = (action, status) => TRANSITIONS[action]?.from.includes(status) ?? false;
+
+// Même règle que publicVisibility, pour une ligne déjà chargée : un événement est public s'il est publié,
+// programmé et échu, ou annulé après avoir été publié (et non supprimé).
+export function isEventPublic(event, now = new Date()) {
+  if (!event || event.deletedAt) return false;
+  return event.status === "PUBLISHED" || isScheduledDue(event, now) || (event.status === "CANCELLED" && event.publishedAt != null);
+}

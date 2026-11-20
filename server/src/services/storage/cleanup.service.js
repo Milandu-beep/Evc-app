@@ -14,6 +14,8 @@ const unreferenced = {
   dailyMessages: { none: {} },
   churchSettings: { none: {} },
   media: { none: {} },
+  galleryCovers: { none: {} },
+  galleryItems: { none: {} },
 };
 
 /**

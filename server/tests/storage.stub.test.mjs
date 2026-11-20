@@ -40,13 +40,14 @@ async function login() {
   return (await r.json()).data.token;
 }
 const token = await login();
+const createdIds = [];
 async function up(buf, name, folder, { auth = true, mime = "application/octet-stream" } = {}) {
   const fd = new FormData();
   if (folder !== undefined) fd.append("folder", folder);
   if (buf) fd.append("file", new Blob([buf], { type: mime }), name);
   const r = await fetch(base + "/storage/upload", { method: "POST", headers: auth ? { authorization: "Bearer " + token } : {}, body: fd });
   const out = [r.status, await r.json()];
-  const left = tmpFiles(); if (left.length) { console.log("LEAK après", name, folder, r.status, left); for (const f of left) (await import("node:fs")).unlinkSync(new URL("../src/uploads/tmp/" + f, import.meta.url)); }
+  if (out[1]?.data?.id) createdIds.push(out[1].data.id);
   return out;
 }
 const del = async (id) => { const r = await fetch(base + "/storage/" + id, { method: "DELETE", headers: { authorization: "Bearer " + token } }); return [r.status, await r.json()]; };
@@ -200,8 +201,10 @@ await t("nettoyage : envoi UPLOADING interrompu -> FAILED ; FAILED ancien suppri
 await t("aucun fichier temporaire restant (fin)", async () => must(tmpFiles().length === 0, "tmp: " + tmpFiles()));
 
 // --- Nettoyage des données de test ---
-await prismaRaw.storageFile.deleteMany({ where: { OR: [{ createdAt: { gte: started } }, { publicId: { startsWith: "EVC-dev/test-storage/" } }] } });
-await prismaRaw.auditLog.deleteMany({ where: { createdAt: { gte: started }, action: { in: ["UPLOAD_FILE", "DELETE_FILE"] } } });
+// Nettoyage limité aux données de CE test (d'autres suites peuvent tourner en parallèle)
+const ownNames = ["z.png", "retry.png", "sim.png"]; // envois échoués : lignes FAILED sans identifiant renvoyé
+await prismaRaw.storageFile.deleteMany({ where: { OR: [{ id: { in: createdIds } }, { publicId: { startsWith: "EVC-dev/test-storage/" } }, { originalFilename: { in: ownNames }, createdAt: { gte: started } }] } });
+await prismaRaw.auditLog.deleteMany({ where: { createdAt: { gte: started }, action: { in: ["UPLOAD_FILE", "DELETE_FILE"] }, entityId: { in: createdIds } } });
 await new Promise((r) => server.close(r));
 await prismaRaw.$disconnect();
 console.log(res.join("\n"));

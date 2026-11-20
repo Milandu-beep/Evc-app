@@ -20,6 +20,8 @@ const SOFT_DELETE_MODELS = new Set([
   "ContactMessage",
   "StorageFile",
   "MediaFolder",
+  "GalleryAlbum",
+  "GalleryItem",
 ]);
 
 const withActive = (args = {}) => ({ ...args, where: { ...args.where, deletedAt: null } });

@@ -12,7 +12,8 @@
     "test:storage:cloudinary": "node tests/storage.cloudinary.test.mjs",
     "test:events": "node tests/events.test.mjs",
     "test:news": "node tests/news.test.mjs",
-    "test:daily-messages": "node tests/dailyMessages.test.mjs"
+    "test:daily-messages": "node tests/dailyMessages.test.mjs",
+    "test:gallery": "node tests/gallery.test.mjs"
   },
   "keywords": [],
   "author": "",

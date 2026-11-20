@@ -141,3 +141,13 @@ Dans le tableau de bord Cloudinary :
 2. Settings → Security : activer **« PDF and ZIP files delivery »**, sinon les PDF
    renvoient une erreur 401.
 3. Laisser désactivés les envois non signés (« unsigned upload ») : seul le backend envoie.
+
+## 9. Galerie
+
+Les photos et vidéos de la galerie s'importent **directement dans un album** (`POST /api/admin/gallery/albums/:id/import`,
+jusqu'à 20 fichiers à la fois) ; elles sont rangées dans le dossier de stockage `gallery`. Photos : JPEG, PNG, WebP (10 Mo) ;
+vidéos : MP4, WebM (100 Mo). Les fichiers audio et PDF ne sont pas acceptés dans une galerie. Pour une vidéo de plus de
+100 Mo, utilisez YouTube. Détail des routes : `API.md`, section Galerie.
+
+Conseils : donnez un **texte alternatif** à chaque photo importante (accessibilité), et 3 à 5 **tags** courts et réutilisés
+(`bapteme`, `jeunesse`, `noel`…) plutôt que beaucoup de tags uniques : ce sont eux qui font fonctionner la recherche transversale.

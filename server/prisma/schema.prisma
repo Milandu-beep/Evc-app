@@ -94,6 +94,12 @@ enum DailyMessageStatus {
   ARCHIVED
 }
 
+// Nature d'un média de galerie (déduite du fichier : image -> PHOTO, vidéo hébergée -> VIDEO)
+enum GalleryItemType {
+  PHOTO
+  VIDEO
+}
+
 // Fournisseur de stockage des fichiers (voir docs/STORAGE_ARCHITECTURE.md)
 enum StorageProvider {
   CLOUDINARY
@@ -170,6 +176,8 @@ model Admin {
   media         Media[]
   auditLogs     AuditLog[]
   storageFiles  StorageFile[]
+  galleryAlbums GalleryAlbum[]
+  galleryItems  GalleryItem[]
 
   @@map("admins")
 }
@@ -211,6 +219,7 @@ model Event {
   createdBy     Admin?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
   translations  EventTranslation[]
   notifications Notification[]
+  galleryAlbums GalleryAlbum[]
 
   @@index([status, startsAt, deletedAt])
   @@index([status, publishAt])
@@ -571,6 +580,8 @@ model StorageFile {
   dailyMessages  DailyMessage[]
   churchSettings ChurchSetting[]
   media          Media[]
+  galleryCovers  GalleryAlbum[]
+  galleryItems   GalleryItem[]
 
   @@unique([provider, resourceType, publicId])
   @@index([checksum])
@@ -599,4 +610,93 @@ model MediaFolder {
   @@index([parentId, name])
   @@index([parentId])
   @@map("media_folders")
+}
+
+// ----------------------------------------------------------------------------
+// Galerie : albums (FR/EN, slug, couverture, événement lié) contenant des médias
+// (photos ou vidéos hébergées, avec tags, texte alternatif et ordre).
+// Cycle de vie : brouillon / publié / archivé. Suppression logique des albums et des médias.
+// ----------------------------------------------------------------------------
+
+model GalleryAlbum {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status        PublishStatus @default(DRAFT)
+  date          DateTime      @db.Date // date de l'album (ex. le jour de l'événement)
+  isFeatured    Boolean       @default(false)
+  sortOrder     Int           @default(0) // ordre d'affichage manuel (croissant)
+  coverImageId  String?       @db.Uuid // sinon : premier média de l'album
+  linkedEventId String?       @db.Uuid // événement lié (facultatif)
+  publishedAt   DateTime?
+  createdById   String?       @db.Uuid
+  createdAt     DateTime      @default(now())
+  deletedAt     DateTime?
+  updatedAt     DateTime      @updatedAt
+
+  coverImage   StorageFile?              @relation(fields: [coverImageId], references: [id], onDelete: SetNull)
+  linkedEvent  Event?                    @relation(fields: [linkedEventId], references: [id], onDelete: SetNull)
+  createdBy    Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations GalleryAlbumTranslation[]
+  items        GalleryItem[]
+
+  @@index([status, date, deletedAt])
+  @@index([isFeatured])
+  @@index([sortOrder])
+  @@index([linkedEventId])
+  @@index([coverImageId])
+  @@index([createdById])
+  @@map("gallery_albums")
+}
+
+model GalleryAlbumTranslation {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  albumId     String   @db.Uuid
+  language    Language
+  slug        String
+  title       String
+  description String?
+
+  album GalleryAlbum @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@unique([albumId, language])
+  @@unique([language, slug])
+  @@map("gallery_album_translations")
+}
+
+model GalleryItem {
+  id            String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  albumId       String          @db.Uuid
+  storageFileId String          @db.Uuid
+  type          GalleryItemType
+  position      Int // ordre dans l'album (croissant) ; des trous sont possibles, l'ordre reste correct
+  // Tags : minuscules, chiffres et tirets (ex. « bapteme »), au plus 20. Index GIN dans la migration SQL.
+  tags          String[]        @default([])
+  createdById   String?         @db.Uuid
+  createdAt     DateTime        @default(now())
+  deletedAt     DateTime?
+  updatedAt     DateTime        @updatedAt
+
+  album        GalleryAlbum             @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  storageFile  StorageFile              @relation(fields: [storageFileId], references: [id], onDelete: Restrict)
+  createdBy    Admin?                   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations GalleryItemTranslation[]
+
+  @@index([albumId, position, deletedAt])
+  @@index([storageFileId])
+  @@index([type])
+  @@index([createdById])
+  @@map("gallery_items")
+}
+
+model GalleryItemTranslation {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  itemId      String   @db.Uuid
+  language    Language
+  title       String?
+  description String?
+  altText     String? // texte alternatif (accessibilité)
+
+  item GalleryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, language])
+  @@map("gallery_item_translations")
 }

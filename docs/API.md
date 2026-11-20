@@ -434,3 +434,92 @@ puis utiliser `notificationTitle` / `notificationBody` de la langue de l'abonné
 `CREATE`, `UPDATE` (champs et dates modifiés ; pour les textes, **seulement les noms des champs**), `STATUS_CHANGE`
 (`action`, `from`, `to`, `publishAt`), `DELETE`, `RESTORE` — entité `daily_messages`. La bascule automatique de la
 publication programmée est écrite sans administrateur (`reason: "scheduled"`).
+
+## Galerie
+
+Albums contenant des photos et des vidéos hébergées (Cloudinary), avec tags pour la recherche transversale.
+Administration sous `/admin/gallery` (Admin et Super Admin) ; lecture publique sous `/gallery`.
+
+### Modèle
+
+**Album** : titre et description FR/EN (le français est obligatoire), `slug` (généré, stable, unique par langue), `date`
+(`AAAA-MM-JJ`, défaut : aujourd'hui), `isFeatured`, `sortOrder` (ordre d'affichage manuel, croissant ; un nouvel album est
+placé à la fin), `coverImageId` (image prête ; sans couverture, le **premier média** sert de couverture), `linkedEventId`
+(événement lié, facultatif). Statuts : `DRAFT`, `PUBLISHED`, `ARCHIVED`.
+
+**Média** : un fichier déjà stocké, avec `type` (`PHOTO` ou `VIDEO`, déduit du fichier), `position` (ordre dans l'album),
+`tags`, et par langue : `title`, `description`, `altText` (tous facultatifs). La **durée** d'une vidéo (`duration`, en
+secondes), les dimensions et la miniature viennent du fichier. Un même fichier ne figure **qu'une fois par album**.
+
+**Tags** : normalisés à l'enregistrement (minuscules, sans accents, chiffres et tirets : `Baptême 2026` → `bapteme-2026`),
+sans doublon, 20 au plus par média, 40 caractères au plus. Ils servent de filtres : les libellés d'affichage sont à la
+charge du frontend.
+
+### Albums (administration)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET | `/admin/gallery/albums` | Liste (`page`, `limit`, `q`, `status`, `featured`, `eventId`, `from`, `to`, `deleted`, `sort`, `order`) |
+| POST | `/admin/gallery/albums` | Création (brouillon) |
+| GET / PATCH | `/admin/gallery/albums/:id` | Détail / modification partielle (`null` efface la couverture ou l'événement lié ; `translations.en: null` supprime l'anglais) |
+| DELETE | `/admin/gallery/albums/:id` | Suppression logique (brouillon ou archivé) |
+| POST | `/admin/gallery/albums/:id/restore` | Restauration |
+| POST | `/admin/gallery/albums/:id/{publish,unpublish,archive,unarchive}` | Transitions (409 si impossible) |
+| PUT | `/admin/gallery/albums/order` | Ordre manuel : `{ "ids": [...] }` |
+
+- **Publier** exige un titre français et **au moins un média** (422 sinon).
+- Supprimer un album ne touche pas ses médias : ils réapparaissent avec lui à la restauration.
+- **Ordre** : `ids` doit contenir **exactement** les albums non supprimés ; sinon 409 (« liste périmée »), pour ne jamais écraser
+  l'ajout d'un album fait entre-temps. Même principe pour l'ordre des médias.
+
+### Médias (administration)
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET | `/admin/gallery/albums/:id/items` | Médias de l'album (`page`, `limit` ≤ 200, `deleted=true` pour la corbeille) |
+| POST | `/admin/gallery/albums/:id/import` | **Import multiple** : `multipart/form-data`, champ `files` (20 fichiers au plus) + `tags` facultatif (séparés par des virgules) |
+| POST | `/admin/gallery/albums/:id/items` | Rattache des fichiers déjà envoyés : `{ "storageFileIds": [...], "tags": [...] }` (50 au plus) |
+| PUT | `/admin/gallery/albums/:id/items/order` | **Réorganisation** : `{ "itemIds": [...] }` (liste exacte, sinon 409) |
+| POST | `/admin/gallery/items/move` | **Déplacement** vers un autre album : `{ "itemIds": [...], "toAlbumId": "…" }` |
+| PATCH | `/admin/gallery/items/:id` | Tags (remplacés) et textes par langue (`null` efface) |
+| DELETE | `/admin/gallery/items/:id` | Suppression logique |
+| POST | `/admin/gallery/items/:id/restore` | Restauration (à la fin de l'album) |
+| GET | `/admin/gallery/tags` | Tags utilisés, avec leur nombre d'usages |
+
+- **Import multiple** : chaque fichier passe par le StorageService (type vérifié par le contenu, EXIF supprimé, dédoublonnage,
+  audit). Photos et vidéos seulement (voir `MEDIA_GUIDE.md`). Un fichier refusé n'arrête pas les autres : la réponse est un
+  **rapport** `{ created, skipped, failed }` — `skipped` : déjà dans l'album ; `failed` : nom, statut HTTP et raison.
+  Statut : 201 si au moins un média est créé, 422 si tout est refusé.
+- **Déplacement** : les médias sont ajoutés **à la fin** de l'album cible dans l'ordre demandé ; tags et textes suivent. Un
+  fichier déjà présent dans la cible est signalé (`skipped`) et laissé en place. Un album archivé ne peut ni recevoir ni
+  perdre de média (409).
+- Un fichier utilisé par la galerie ne peut pas être supprimé du stockage (409 avec le détail des usages) ni nettoyé comme orphelin.
+
+### Lecture publique
+
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/gallery/home` | Albums **mis en avant** (ordre manuel) et albums **récents** (`limit` 1–24, défaut 6) |
+| GET | `/gallery/albums` | Albums publiés. Filtres : `q`, `tags`, `match`, `eventId`, `featured`, `from`, `to`, `lang`, `sort` (`recent` par défaut, ou `manual`), `page`, `limit` |
+| GET | `/gallery/albums/:slug` | Un album et ses médias (paginés : `page`, `limit` ≤ 200, défaut 60 ; filtres `tags`, `match`, `type`) |
+| GET | `/gallery/items` | **Recherche transversale** de médias : `q`, `tags`, `match`, `type` (`PHOTO`/`VIDEO`), `albumId`, `eventId`, `lang`, `page`, `limit` |
+| GET | `/gallery/tags` | Tags des albums publiés, avec leur nombre d'usages (pour construire un filtre) |
+| GET | `/events/:slug/albums` | **Albums liés à un événement** (consultation depuis la page de l'événement) |
+
+- **Tags** : `tags=bapteme,jeunesse` ; `match=all` (défaut : tous les tags) ou `match=any` (au moins un). La saisie est
+  normalisée comme à l'enregistrement.
+- **Recherche `q`** : titre, description, texte alternatif et tag. Sur `/gallery/albums`, un album ressort aussi si l'un de ses
+  **médias** correspond.
+- **Événement lié** : un album porte `linkedEvent { id, slug, title, startsAt }` seulement si l'événement est lui-même visible
+  du public. `/events/:slug/albums` répond 404 pour un événement non public.
+- **Texte alternatif** : `altText`, sinon le titre du média, sinon le titre de l'album (jamais vide).
+- Réponse d'un album : `id`, `slug`, `language`, `title`, `description`, `date`, `isFeatured`, `cover`, `itemCount`, `linkedEvent`,
+  `availableLanguages`, `alternates`. Un média : `id`, `type`, `position`, `title`, `description`, `altText`, `tags`, `url`
+  (optimisée), `thumbnailUrl`, `width`, `height`, `duration`. Aucun champ interne (statut, auteur, suppression).
+- Langue : `?lang=` sinon `Accept-Language`, sinon français, avec repli sur le français. `Cache-Control: public, max-age=60`.
+
+### Audit
+
+Entités `gallery_albums` et `gallery_items` : `CREATE` (un enregistrement par import ou rattachement : nombre, identifiants,
+tags), `UPDATE` (champs, tags ; **jamais les textes** ; déplacement et réorganisation compris), `STATUS_CHANGE`, `DELETE`,
+`RESTORE`. Chaque fichier envoyé par l'import écrit aussi `UPLOAD_FILE`.

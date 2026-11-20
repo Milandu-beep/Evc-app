@@ -8,6 +8,8 @@ import newsRoutes from "./news.routes.js";
 import adminNewsRoutes from "./admin.news.routes.js";
 import dailyMessagesRoutes from "./dailyMessages.routes.js";
 import adminDailyMessagesRoutes from "./admin.dailyMessages.routes.js";
+import galleryRoutes from "./gallery.routes.js";
+import adminGalleryRoutes from "./admin.gallery.routes.js";
 import { sendSuccess } from "../utils/response.js";
 import { API_VERSION } from "../config/constants.js";
 
@@ -26,6 +28,8 @@ router.use("/news", newsRoutes);
 router.use("/admin/news", adminNewsRoutes);
 router.use("/daily-messages", dailyMessagesRoutes);
 router.use("/admin/daily-messages", adminDailyMessagesRoutes);
+router.use("/gallery", galleryRoutes);
+router.use("/admin/gallery", adminGalleryRoutes);
 
 // Les routes métier seront montées ici, sprint par sprint.
 

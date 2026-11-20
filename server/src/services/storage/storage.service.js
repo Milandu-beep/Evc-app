@@ -267,15 +267,17 @@ const auditUpload = (req, file, { reused }) =>
 // restaurable) ne doit pas être supprimé. prismaRaw voit aussi les lignes supprimées.
 // ---------------------------------------------------------------------------
 export async function countReferences(fileId) {
-  const [events, news, dailyMessages, churchSettings, media] = await Promise.all([
+  const [events, news, dailyMessages, churchSettings, media, galleryAlbums, galleryItems] = await Promise.all([
     prismaRaw.event.count({ where: { coverImageId: fileId } }),
     prismaRaw.news.count({ where: { coverImageId: fileId } }),
     prismaRaw.dailyMessage.count({ where: { imageId: fileId } }),
     prismaRaw.churchSetting.count({ where: { logoId: fileId } }),
     prismaRaw.media.count({ where: { storageFileId: fileId } }),
+    prismaRaw.galleryAlbum.count({ where: { coverImageId: fileId } }),
+    prismaRaw.galleryItem.count({ where: { storageFileId: fileId } }),
   ]);
-  const refs = { events, news, dailyMessages, churchSettings, media };
-  return { total: events + news + dailyMessages + churchSettings + media, ...refs };
+  const refs = { events, news, dailyMessages, churchSettings, media, galleryAlbums, galleryItems };
+  return { total: events + news + dailyMessages + churchSettings + media + galleryAlbums + galleryItems, ...refs };
 }
 
 // ---------------------------------------------------------------------------

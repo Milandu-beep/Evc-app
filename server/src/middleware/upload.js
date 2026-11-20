@@ -16,7 +16,11 @@ const upload = multer({
     destination: tmpDir,
     filename: (req, file, cb) => cb(null, randomUUID()),
   }),
-  limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 20 },
 });
+
+// Import multiple (galerie) : jusqu'à 20 fichiers dans le champ « files ».
+export const MAX_IMPORT_FILES = 20;
+export const uploadMany = upload.array("files", MAX_IMPORT_FILES);
 
 export default upload;

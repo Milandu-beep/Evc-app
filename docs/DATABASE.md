@@ -13,7 +13,7 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 - **Suppression logique** : `deletedAt` sur `admins`, `events`, `news`, `daily_messages`,
   `notifications`, `media`, `contact_messages`, `storage_files`, `media_folders`. Voir « Suppression logique » ci-dessous.
 - **Fichiers** : jamais en base, seulement `storage_files`. `events`, `news` (`coverImageId`), `daily_messages`
-  (`imageId`), `church_settings` (`logoId`) et `media` (`storageFileId`) y pointent, en `SET NULL`. Voir `STORAGE_ARCHITECTURE.md`.
+  (`imageId`), `church_settings` (`logoId`), `media` (`storageFileId`), `gallery_albums` (`coverImageId`) y pointent en `SET NULL` ; `gallery_items` (`storageFileId`) en `RESTRICT`. Voir `STORAGE_ARCHITECTURE.md`.
 - **Suppression** : les traductions suivent leur parent (`CASCADE`). Les liens vers
   `admins` et entre contenus sont `SET NULL` : supprimer un compte ne supprime pas le contenu.
 - **Sécurité Supabase** : RLS activée sur toutes les tables, sans politique. L'API REST
@@ -32,6 +32,8 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 | `media` | Médiathèque : `IMAGE`, `PDF`, `AUDIO`, `YOUTUBE` | `media_translations` : titre, description |
 | `church_settings` | Paramètres de l'église (ligne unique, id = 1) : contact, réseaux | `church_setting_translations` : slogan, mission, adresse, repères |
 | `service_schedules` | Horaires de culte (`dayOfWeek` enum `Weekday`, `HH:mm`) | `service_schedule_translations` : libellé |
+| `gallery_albums` | Albums de la galerie : date, statut (brouillon / publié / archivé), mise en avant, ordre manuel (`sortOrder`), couverture, événement lié (`linkedEventId`) | `gallery_album_translations` : slug, titre, description |
+| `gallery_items` | Médias d'un album : fichier (`storage_files`), type `PHOTO` / `VIDEO`, `position`, `tags` (tableau, index GIN) | `gallery_item_translations` : titre, description, texte alternatif (tous facultatifs) |
 | `contact_messages` | Messages du formulaire Contact | — |
 | `audit_logs` | Journal d'audit (qui, quoi, quand, IP) | — |
 | `storage_files` | Métadonnées de chaque fichier hébergé (Cloudinary) : statut (`UPLOADING`, `READY`, `FAILED`, `DELETED`), `publicId`, `resourceType`, URLs du fournisseur, nom d'origine, type, taille, dimensions, durée, empreinte SHA-256, dossier logique | — |
@@ -73,6 +75,7 @@ chaque parent 1─n sa table de traductions                                     
   `media_folders(parent, nom)` (parmi les dossiers actifs).
 - `CHECK` sur `events` : `endsAt >= startsAt` ; `SCHEDULED` exige `publishAt` ; `registrationUrl` en `http(s)://`.
 - `CHECK` sur `events` : `capacity > 0` ; `registeredCount >= 0` et `<= capacity` ; `color` en `#rrggbb` ; `icon` en minuscules et tirets.
+- Galerie : index unique partiel `gallery_items(albumId, storageFileId)` (un fichier par album actif) ; `CHECK` : `position >= 0`, 20 tags au plus, slug d'album valide.
 - `CHECK` sur `daily_messages` : `SCHEDULED` exige `publishAt` ; sur `daily_message_translations` : `estimatedReadingTime >= 1`.
 - `CHECK` sur `news` : `SCHEDULED` exige `publishAt` ; sur `news_translations.slug` : minuscules, chiffres et tirets.
 - `CHECK` sur `event_translations.slug` : minuscules, chiffres et tirets.
@@ -86,6 +89,7 @@ chaque parent 1─n sa table de traductions                                     
 | `20261120091524_init_admins` | Table `admins`, enum `Role` |
 | `20261120092905_data_model` | 15 tables, enums, index, contraintes `CHECK`, RLS |
 | `20261120100000_db_hardening` | UUID, `deletedAt`, enum `Weekday`, table `audit_logs`, index partiel de la date des messages, RLS |
+| `20261120160000_gallery` | Albums et médias de galerie (4 tables), enum `GalleryItemType`, index GIN sur les tags, index partiels (un fichier par album actif), contraintes `CHECK`, RLS |
 | `20261120150000_daily_messages` | Messages du jour : enum `DailyMessageStatus`, `publishAt`, `publishedAt`, `sendNotification` ; traductions : `verseReference` (ex-`bibleReference`), `verseText`, `theme`, `estimatedReadingTime`, `notificationTitle`, `notificationBody` ; contraintes `CHECK` |
 | `20261120140000_event_extras_and_news` | Événements : `EventType`, `capacity`, `registeredCount`, `color`, `icon` (contraintes `CHECK`) ; actualités : enum `NewsStatus`, `publishAt`, vedette, `notifyOnPublish`, index et contraintes (programmation, slug) |
 | `20261120130000_events_lifecycle` | Enum `EventStatus` (`DRAFT`, `SCHEDULED`, `PUBLISHED`, `CANCELLED`, `ARCHIVED` ; « terminé » est déduit), colonnes de publication, d'annulation, d'inscription et `notifyOnPublish`, index `(status, publishAt)`, contraintes `CHECK` (dates, programmation, URL, slug) |
@@ -102,3 +106,5 @@ npx prisma migrate deploy    # appliquer en production
 npx prisma generate          # régénérer le client
 npx prisma studio            # explorer les données
 ```
+
+> Les tables `media` et `media_folders` (Sprint 2) ne sont pas utilisées par la galerie : elles seront reprises pour les Prédications.

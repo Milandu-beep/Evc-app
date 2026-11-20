@@ -94,7 +94,7 @@ export async function buildCreateRows(translations, { textFields, slugTools }) {
  * (sauf le français). Retourne { ops, changes } : les opérations à exécuter et un résumé pour l'audit
  * qui ne contient JAMAIS le texte, seulement les noms des champs modifiés.
  */
-export async function planTranslations({ existingByLang, translations, textFields, requiredOnCreate, slugTools, parentId }) {
+export async function planTranslations({ existingByLang, translations, textFields, requiredOnCreate, slugTools, parentId, requireDefault = true }) {
   const ops = [];
   const changes = {};
 
@@ -102,7 +102,7 @@ export async function planTranslations({ existingByLang, translations, textField
     const existing = existingByLang[language];
 
     if (t === null) {
-      if (language === DEFAULT_LANGUAGE) throw invalid(`translations.${language}`, "La traduction française ne peut pas être supprimée");
+      if (requireDefault && language === DEFAULT_LANGUAGE) throw invalid(`translations.${language}`, "La traduction française ne peut pas être supprimée");
       if (existing) {
         ops.push({ kind: "delete", id: existing.id });
         changes[language] = "deleted";
