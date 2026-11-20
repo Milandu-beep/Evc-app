@@ -27,6 +27,10 @@ Erreur :
 | 429 | Trop de tentatives de connexion |
 | 500 | Erreur interne |
 
+## Identifiants
+
+Tous les identifiants de ressources sont des **UUID** (chaînes). Un id mal formé donne une erreur 422.
+
 ## Authentification
 
 Le token JWT est envoyé dans l'en-tête `Authorization: Bearer <token>`.
@@ -51,13 +55,15 @@ Réponse 200 :
   "data": {
     "token": "<jwt>",
     "admin": {
-      "id": 1, "email": "admin@example.com", "firstName": "Super", "lastName": "Admin",
+      "id": "3f2b8c1e-7a4d-4e0b-9c55-1d2e6f7a8b90", "email": "admin@example.com", "firstName": "Super", "lastName": "Admin",
       "role": "SUPER_ADMIN", "isActive": true,
       "createdAt": "2026-11-20T09:19:26.068Z", "updatedAt": "2026-11-20T09:19:26.068Z"
     }
   }
 }
 ```
+
+Chaque connexion réussie est enregistrée dans le journal d'audit.
 
 Erreurs : 401 (« Email ou mot de passe incorrect », identique si l'email est inconnu
 ou le compte désactivé), 422 (champs invalides), 429.
