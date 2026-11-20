@@ -46,6 +46,7 @@ enum MediaType {
   PDF
   AUDIO
   YOUTUBE
+  VIDEO
 }
 
 enum NotificationType {
@@ -53,6 +54,19 @@ enum NotificationType {
   EVENT
   NEWS
   DAILY_MESSAGE
+}
+
+// Fournisseur de stockage des fichiers (voir docs/STORAGE_ARCHITECTURE.md)
+enum StorageProvider {
+  CLOUDINARY
+  R2
+}
+
+// Type de ressource chez le fournisseur (Cloudinary : image / video / raw ; l'audio est « video »)
+enum StorageResourceType {
+  IMAGE
+  VIDEO
+  RAW
 }
 
 // Jour de la semaine (horaires de culte)
@@ -73,6 +87,8 @@ enum AuditAction {
   DELETE
   RESTORE
   LOGIN
+  UPLOAD_FILE
+  DELETE_FILE
 }
 
 enum NotificationStatus {
@@ -105,6 +121,7 @@ model Admin {
   notifications Notification[]
   media         Media[]
   auditLogs     AuditLog[]
+  storageFiles  StorageFile[]
 
   @@map("admins")
 }
@@ -114,17 +131,18 @@ model Admin {
 // ----------------------------------------------------------------------------
 
 model Event {
-  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status      PublishStatus @default(DRAFT)
-  coverImage  String? // URL Supabase Storage
-  startsAt    DateTime
-  endsAt      DateTime?
-  isFeatured  Boolean       @default(false)
-  createdById String?       @db.Uuid
-  createdAt   DateTime      @default(now())
-  deletedAt   DateTime?
-  updatedAt   DateTime      @updatedAt
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status       PublishStatus @default(DRAFT)
+  coverImageId String?       @db.Uuid
+  startsAt     DateTime
+  endsAt       DateTime?
+  isFeatured   Boolean       @default(false)
+  createdById  String?       @db.Uuid
+  createdAt    DateTime      @default(now())
+  deletedAt    DateTime?
+  updatedAt    DateTime      @updatedAt
 
+  coverImage    StorageFile?       @relation(fields: [coverImageId], references: [id], onDelete: SetNull)
   createdBy     Admin?             @relation(fields: [createdById], references: [id], onDelete: SetNull)
   translations  EventTranslation[]
   notifications Notification[]
@@ -132,6 +150,7 @@ model Event {
   @@index([status, startsAt, deletedAt])
   @@index([isFeatured])
   @@index([createdById])
+  @@index([coverImageId])
   @@map("events")
 }
 
@@ -156,21 +175,23 @@ model EventTranslation {
 // ----------------------------------------------------------------------------
 
 model News {
-  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  status      PublishStatus @default(DRAFT)
-  coverImage  String?
-  publishedAt DateTime? // renseignée à la publication
-  createdById String?       @db.Uuid
-  createdAt   DateTime      @default(now())
-  deletedAt   DateTime?
-  updatedAt   DateTime      @updatedAt
+  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status       PublishStatus @default(DRAFT)
+  coverImageId String?       @db.Uuid
+  publishedAt  DateTime? // renseignée à la publication
+  createdById  String?       @db.Uuid
+  createdAt    DateTime      @default(now())
+  deletedAt    DateTime?
+  updatedAt    DateTime      @updatedAt
 
+  coverImage    StorageFile?      @relation(fields: [coverImageId], references: [id], onDelete: SetNull)
   createdBy     Admin?            @relation(fields: [createdById], references: [id], onDelete: SetNull)
   translations  NewsTranslation[]
   notifications Notification[]
 
   @@index([status, publishedAt, deletedAt])
   @@index([createdById])
+  @@index([coverImageId])
   @@map("news")
 }
 
@@ -198,11 +219,13 @@ model DailyMessage {
   id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   date        DateTime      @db.Date
   status      PublishStatus @default(DRAFT)
+  imageId     String?       @db.Uuid
   createdById String?       @db.Uuid
   createdAt   DateTime      @default(now())
   deletedAt   DateTime?
   updatedAt   DateTime      @updatedAt
 
+  image         StorageFile?              @relation(fields: [imageId], references: [id], onDelete: SetNull)
   createdBy     Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
   translations  DailyMessageTranslation[]
   notifications Notification[]
@@ -211,6 +234,7 @@ model DailyMessage {
   @@index([date])
   @@index([status, date, deletedAt])
   @@index([createdById])
+  @@index([imageId])
   @@map("daily_messages")
 }
 
@@ -281,25 +305,28 @@ model NotificationTranslation {
 // ----------------------------------------------------------------------------
 
 model Media {
-  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  type         MediaType
-  status       PublishStatus @default(DRAFT)
-  // Fichier stocké (IMAGE / PDF / AUDIO) : chemin dans le bucket + URL publique
-  storagePath  String?
-  url          String? // URL publique du fichier, ou URL YouTube pour type YOUTUBE
-  youtubeId    String? // identifiant de la vidéo (type YOUTUBE)
-  mimeType     String?
-  sizeBytes    Int?
-  uploadedById String?       @db.Uuid
-  createdAt    DateTime      @default(now())
-  deletedAt    DateTime?
-  updatedAt    DateTime      @updatedAt
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type          MediaType
+  status        PublishStatus @default(DRAFT)
+  // Fichier hébergé (IMAGE / PDF / AUDIO / VIDEO) : voir storage_files. Vide pour YOUTUBE.
+  storageFileId String?       @db.Uuid
+  folderId      String?       @db.Uuid
+  url           String? // lien YouTube (type YOUTUBE uniquement)
+  youtubeId     String? // identifiant de la vidéo (type YOUTUBE)
+  uploadedById  String?       @db.Uuid
+  createdAt     DateTime      @default(now())
+  deletedAt     DateTime?
+  updatedAt     DateTime      @updatedAt
 
+  storageFile  StorageFile?       @relation(fields: [storageFileId], references: [id], onDelete: SetNull)
+  folder       MediaFolder?       @relation(fields: [folderId], references: [id], onDelete: SetNull)
   uploadedBy   Admin?             @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
   translations MediaTranslation[]
 
   @@index([type, status, createdAt, deletedAt])
   @@index([uploadedById])
+  @@index([storageFileId])
+  @@index([folderId])
   @@map("media")
 }
 
@@ -329,8 +356,10 @@ model ChurchSetting {
   facebookUrl String?
   youtubeUrl  String?
   tiktokUrl   String?
+  logoId      String?  @db.Uuid
   updatedAt   DateTime @updatedAt
 
+  logo         StorageFile?               @relation(fields: [logoId], references: [id], onDelete: SetNull)
   translations ChurchSettingTranslation[]
 
   @@map("church_settings")
@@ -419,4 +448,63 @@ model AuditLog {
   @@index([adminId, createdAt])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ----------------------------------------------------------------------------
+// Stockage de fichiers (Cloudinary) : une ligne par fichier, partagée entre contenus.
+// Le fichier n'est jamais dans la base : seulement ses métadonnées.
+// ----------------------------------------------------------------------------
+
+model StorageFile {
+  id               String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider         StorageProvider
+  publicId         String // identifiant chez le fournisseur : sert à supprimer et à construire les URLs
+  resourceType     StorageResourceType
+  url              String // URL telle que renvoyée par le fournisseur (instantané)
+  secureUrl        String // URL HTTPS telle que renvoyée par le fournisseur (instantané)
+  folder           String // dossier logique, ex. « events/covers » (voir config/storage.js)
+  originalFilename String // nom d'origine, ex. « Guide Baptême.pdf »
+  mimeType         String
+  bytes            Int
+  width            Int?
+  height           Int?
+  duration         Float? // secondes (vidéo, audio)
+  checksum         String // SHA-256 hexadécimal du fichier envoyé
+  createdById      String?             @db.Uuid
+  createdAt        DateTime            @default(now())
+  deletedAt        DateTime?
+
+  createdBy      Admin?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  events         Event[]
+  news           News[]
+  dailyMessages  DailyMessage[]
+  churchSettings ChurchSetting[]
+  media          Media[]
+
+  @@unique([provider, resourceType, publicId])
+  @@index([checksum])
+  @@index([folder])
+  @@index([deletedAt])
+  @@index([createdById])
+  @@map("storage_files")
+}
+
+// Dossiers visibles dans la médiathèque (Baptêmes, Séminaires…) : étiquettes en base,
+// distinctes de l'arborescence technique du stockage.
+model MediaFolder {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  parentId  String?   @db.Uuid
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  parent   MediaFolder?  @relation("MediaFolderTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children MediaFolder[] @relation("MediaFolderTree")
+  media    Media[]
+
+  // Unicité (parent, nom) parmi les lignes actives : index partiel dans la migration SQL
+  @@index([parentId, name])
+  @@index([parentId])
+  @@map("media_folders")
 }

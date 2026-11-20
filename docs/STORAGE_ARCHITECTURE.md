@@ -1,6 +1,6 @@
 # Architecture du stockage
 
-Version : 3.0 — Statut : **validé sur le principe ; en attente des accès Cloudinary**
+Version : 3.1 — Statut : **implémenté (Sprint 3) ; test réel Cloudinary en attente d'une clé API valide**
 Références : `PROJECT_CHARTER.md` §5 (Stockage) et §10 (Médiathèque).
 
 ## 1. Principes
@@ -35,7 +35,7 @@ Tout est stocké chez Cloudinary. Le `resource_type` Cloudinary dépend du type 
 | Vidéo YouTube | lien | — | — | Pas de fichier (mode principal pour les longues vidéos) |
 
 - **Limites = celles de l'offre gratuite Cloudinary** : 10 Mo (images), 100 Mo (vidéos et
-  audio), 10 Mo (fichiers `raw`, donc PDF). Elles sont dans `config/constants.js` et se
+  audio), 10 Mo (fichiers `raw`, donc PDF). Elles sont dans `config/storage.js` et se
   relèvent avec une offre payante. Les chiffres de l'offre gratuite peuvent évoluer :
   vérifier « Usage Limits » dans le tableau de bord.
 - **Écart avec la charte §10** : la charte ne prévoyait que des vidéos YouTube ; l'envoi de
@@ -63,7 +63,7 @@ EVC/
 ├── events/        covers/  gallery/   documents/                 images, images, PDF
 ├── news/          covers/  gallery/                              images
 ├── sermons/       audio/   thumbnails/   documents/              MP3, images, PDF
-├── gallery/       {AAAA}/  (2026, 2027…, créé automatiquement)   images, vidéos
+├── gallery/                                                      images, vidéos
 ├── profiles/      pastors/ admins/    users/                     images
 └── temporary/                                                    tout type
 ```
@@ -72,23 +72,26 @@ EVC/
   pour ne jamais mélanger les fichiers de test et de production.
 - Un dossier inconnu, ou un type non autorisé dans ce dossier (une vidéo dans
   `events/covers`, par exemple), est refusé (422).
-- `gallery/{AAAA}` : l'année est validée (2000 à année en cours + 1).
+- **Classement par date** : tout fichier est rangé sous `{dossier}/{AAAA}/{MM}/{JJ}/` (date d'envoi, UTC). `gallery`
+  se retrouve donc classée par année (`gallery/2026/…`, `gallery/2027/…`) sans paramètre supplémentaire.
 - `temporary/` : destination provisoire quand le contenu n'existe pas encore. **Un fichier
   n'est jamais déplacé** (clés immuables) : rattaché à un contenu, il garde sa clé. Les
   fichiers non rattachés sont purgés par le nettoyage du §7.
 - Les vidéos n'ont pas de dossier dédié dans cette arborescence : elles vont dans
-  `gallery/{AAAA}`. Un dossier `sermons/videos` se rajoute en une ligne si besoin.
+  `gallery`. Un dossier `sermons/videos` se rajoute en une ligne si besoin.
 
 ## 4. Identifiants des objets
 
 ```
-publicId = {racine}/{dossier}/{uuid}            ex. EVC/events/covers/7c1e…b2        (image, vidéo, audio)
-publicId = {racine}/{dossier}/{uuid}.{ext}      ex. EVC/events/documents/9a40…3f.pdf (raw : extension obligatoire)
+publicId = {racine}/{dossier}/{AAAA}/{MM}/{JJ}/{uuid}        ex. EVC/events/covers/2026/11/20/c9e4…e2f1   (image, vidéo, audio)
+publicId = {racine}/{dossier}/{AAAA}/{MM}/{JJ}/{uuid}.{ext}  ex. EVC/events/documents/2026/11/20/9a40…3f.pdf (raw : extension obligatoire)
 ```
 
-- `uuid` = identifiant de la ligne `storage_files`.
+- `uuid` = identifiant de la ligne `storage_files` (date + uuid : aucun conflit de nom possible, le nom
+  d'origine n'apparaît jamais dans la clé). Pour une image, l'extension n'est pas dans le `publicId` :
+  Cloudinary l'ajoute à la livraison (`f_auto` choisit même le format).
 - Extension déduite du type réel détecté, jamais du nom envoyé.
-- Le nom d'origine est conservé en base (`originalName`), assaini (pas de chemin, pas de
+- Le nom d'origine est conservé en base (`originalFilename`, ex. « Guide Baptême.pdf »), assaini (pas de chemin, pas de
   caractères de contrôle, longueur limitée), pour l'affichage et le téléchargement.
 - Le dossier logique est aussi enregistré en base (`storage_files.folder`, ex.
   `events/covers`) pour filtrer et ranger sans interroger le fournisseur.
@@ -108,7 +111,7 @@ publicId = {racine}/{dossier}/{uuid}.{ext}      ex. EVC/events/documents/9a40…
    └─ fichier actif identique (même empreinte) → réutilisation, pas de doublon
 6. Envoi à Cloudinary avec le bon resource_type (§2)
 7. Création de la ligne storage_files  (si la base échoue → suppression chez Cloudinary)
-8. Audit (action CREATE, entité storage_files)
+8. Audit : action UPLOAD_FILE (entité storage_files) ; chaque suppression écrit DELETE_FILE
 ```
 
 Il n'y a pas de transaction commune entre la base et le fournisseur : l'ordre « fournisseur
@@ -124,8 +127,8 @@ https://res.cloudinary.com/{cloud}/{resource_type}/upload/{transformations}/{pub
 ```
 
 - Images : transformations par défaut `f_auto,q_auto` ; `options.width` ajoute `w_{n}`.
-- Vidéos : `f_auto,q_auto` et miniature générée en demandant une image (`.jpg`) du même
-  `publicId`.
+- Vidéos : `f_auto,q_auto`. **Miniature automatique** : image `.jpg` extraite de la vidéo
+  (`so_auto`, 400 px), renvoyée dans `thumbnailUrl`, sans rien stocker.
 - Audio, PDF : URL directe, sans transformation.
 - CDN mondial inclus. Tous les fichiers sont publics en lecture, car tout contenu publié
   est public ; la confidentialité d'un brouillon repose sur des identifiants non devinables.
@@ -156,14 +159,16 @@ https://res.cloudinary.com/{cloud}/{resource_type}/upload/{transformations}/{pub
 ```
 storage_files
   id (uuid) · provider (enum StorageProvider : CLOUDINARY, R2)
+  publicId (identifiant chez le fournisseur : sert à supprimer et à construire les URLs)
   resourceType (enum StorageResourceType : IMAGE, VIDEO, RAW)
-  folder (dossier logique, ex. « events/covers », « gallery/2026 »)
-  objectKey (publicId chez Cloudinary)
-  originalName · mimeType · sizeBytes · checksumSha256 · etag?
-  width? · height? · durationSeconds?
-  uploadedById? → admins (SET NULL) · createdAt · deletedAt?
-  unique (provider, resourceType, objectKey)
-  index (checksumSha256)    index (folder)    index (deletedAt)
+  url · secureUrl (adresses brutes renvoyées par le fournisseur, conservées pour mémoire)
+  folder (dossier logique, ex. « events/covers »)
+  originalFilename · mimeType · bytes · width? · height? · duration? (secondes)
+  checksum (SHA-256)
+  createdById? → admins (SET NULL) · createdAt · deletedAt?
+  unique (provider, resourceType, publicId)
+  unique partiel (provider, resourceType, checksum) WHERE deletedAt IS NULL   -- dédoublonnage
+  index (checksum)    index (folder)    index (deletedAt)
 
 media_folders
   id (uuid) · name · parentId? → media_folders (arborescence)
@@ -171,8 +176,9 @@ media_folders
   unique (parentId, name)
 ```
 
-`resourceType` est nécessaire à Cloudinary pour retrouver, supprimer et construire l'URL
-d'un objet. Il n'y a plus de colonne `bucket` (plus de buckets).
+`publicId` et `resourceType` sont nécessaires à Cloudinary pour retrouver, supprimer et construire l'URL
+d'un objet : l'URL seule ne suffit pas. Les `url` / `secureUrl` enregistrées sont un instantané ;
+l'API sert des URL **calculées** (`urlFor`), qui ne dépendent pas d'elles. Plus de colonne `bucket`.
 
 ### Tables existantes modifiées
 
@@ -200,7 +206,7 @@ jamais un contenu. Les tables concernées sont vides, la migration est sans risq
 - Détection de type par le contenu, limites de taille, SVG refusé, EXIF supprimé.
 - Limitation de débit sur les envois (en plus de celle du login).
 - Noms d'origine assainis, jamais utilisés dans les identifiants d'objets.
-- Chaque envoi, rattachement et suppression est écrit dans `audit_logs`.
+- Chaque envoi (`UPLOAD_FILE`) et suppression (`DELETE_FILE`) est écrit dans `audit_logs`.
 - Dans Cloudinary (Settings → Security), laisser désactivée toute option d'envoi non signé
   (« unsigned upload ») : seul le backend envoie.
 
@@ -242,7 +248,7 @@ STORAGE_ROOT=EVC-dev             # EVC en production
 
 Plus aucun bucket Supabase à créer.
 
-## 13. Livrable du Sprint 3
+## 13. Livrable du Sprint 3 (réalisé)
 
 - Migration : `storage_files`, `media_folders`, clés étrangères, enum `VIDEO`, retrait des
   anciennes colonnes, RLS sur les nouvelles tables.

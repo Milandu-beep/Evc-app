@@ -13,6 +13,9 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
     status = HTTP_STATUS.UNAUTHORIZED;
     message = "Token invalide ou expiré";
+  } else if (err.name === "MulterError") {
+    status = err.code === "LIMIT_FILE_SIZE" ? 413 : HTTP_STATUS.BAD_REQUEST;
+    message = err.code === "LIMIT_FILE_SIZE" ? "Fichier trop volumineux" : "Envoi de fichier invalide";
   } else if (err.type === "entity.parse.failed") {
     status = HTTP_STATUS.BAD_REQUEST;
     message = "JSON invalide";

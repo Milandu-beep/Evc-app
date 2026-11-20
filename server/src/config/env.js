@@ -9,6 +9,13 @@ if (missing.length > 0) {
   throw new Error(`Variables d'environnement manquantes : ${missing.join(", ")}`);
 }
 
+// Racine des fichiers chez le fournisseur : séparée par environnement pour ne jamais
+// mélanger les fichiers de test et de production.
+const storageRoot = process.env.STORAGE_ROOT || (process.env.NODE_ENV === "production" ? "EVC" : "EVC-dev");
+if (!/^[A-Za-z0-9_-]+$/.test(storageRoot)) {
+  throw new Error("STORAGE_ROOT invalide (lettres, chiffres, - et _ uniquement)");
+}
+
 const env = Object.freeze({
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: process.env.NODE_ENV === "production",
@@ -17,6 +24,13 @@ const env = Object.freeze({
     ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
     : "*",
   databaseUrl: process.env.DATABASE_URL,
+  storageRoot,
+  // Facultatif au démarrage : le module de stockage échoue proprement s'il est absent.
+  cloudinary: Object.freeze({
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    apiSecret: process.env.CLOUDINARY_API_SECRET,
+  }),
   jwt: Object.freeze({
     secret: process.env.JWT_SECRET,
     expiresIn: process.env.JWT_EXPIRES_IN || "7d",
