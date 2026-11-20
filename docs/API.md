@@ -79,3 +79,25 @@ Authentification requise. Retourne le profil de l'administrateur connecté (mêm
 
 Réponse 200 : `{ "status": "ok", "database": "up", "uptime": 12.3, "version": "1.0.0" }`.
 Erreur 500 si la base est inaccessible.
+
+## Stockage de fichiers
+
+Voir `MEDIA_GUIDE.md` pour les types, tailles et dossiers. Authentification requise
+(Admin ou Super Admin).
+
+### POST `/storage/upload`
+
+`multipart/form-data` : `file` (le fichier) et `folder` (dossier logique, ex. `events/covers`).
+Limité à 100 envois par 15 minutes et par IP.
+
+- **201** : fichier envoyé. **200** avec `"reused": true` si le même fichier existait déjà.
+- Réponse : `id`, `status` (`READY`), `folder`, `originalFilename`, `mimeType`, `resourceType`, `bytes`, `width`,
+  `height`, `duration`, `url` (HTTPS, optimisée), `thumbnailUrl` (images et vidéos), `createdAt`, `reused`.
+- Erreurs : 413 trop volumineux · 415 format non autorisé · 422 dossier inconnu, type non
+  autorisé dans ce dossier ou fichier absent · 409 envoi identique déjà en cours · 429 · 502 fournisseur indisponible · 503 stockage non configuré.
+
+### DELETE `/storage/:id`
+
+Supprime le fichier chez le fournisseur et en base. **409** s'il est encore utilisé par un contenu
+(la réponse détaille les références) ou si son envoi est encore en cours ; **404** s'il n'existe pas ; **422** si l'id n'est pas un UUID.
+Chaque envoi et chaque suppression sont tracés dans le journal d'audit (`UPLOAD_FILE`, `DELETE_FILE`).

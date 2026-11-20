@@ -11,7 +11,9 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 - **Identifiants** : tous les `id` sont des UUID natifs PostgreSQL (`gen_random_uuid()`), sauf
   `church_settings` (ligne unique, id = 1). Dans l'API, les ids sont donc des chaînes UUID.
 - **Suppression logique** : `deletedAt` sur `admins`, `events`, `news`, `daily_messages`,
-  `notifications`, `media`, `contact_messages`. Voir « Suppression logique » ci-dessous.
+  `notifications`, `media`, `contact_messages`, `storage_files`, `media_folders`. Voir « Suppression logique » ci-dessous.
+- **Fichiers** : jamais en base, seulement `storage_files`. `events`, `news` (`coverImageId`), `daily_messages`
+  (`imageId`), `church_settings` (`logoId`) et `media` (`storageFileId`) y pointent, en `SET NULL`. Voir `STORAGE_ARCHITECTURE.md`.
 - **Suppression** : les traductions suivent leur parent (`CASCADE`). Les liens vers
   `admins` et entre contenus sont `SET NULL` : supprimer un compte ne supprime pas le contenu.
 - **Sécurité Supabase** : RLS activée sur toutes les tables, sans politique. L'API REST
@@ -32,6 +34,8 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 | `service_schedules` | Horaires de culte (`dayOfWeek` enum `Weekday`, `HH:mm`) | `service_schedule_translations` : libellé |
 | `contact_messages` | Messages du formulaire Contact | — |
 | `audit_logs` | Journal d'audit (qui, quoi, quand, IP) | — |
+| `storage_files` | Métadonnées de chaque fichier hébergé (Cloudinary) : statut (`UPLOADING`, `READY`, `FAILED`, `DELETED`), `publicId`, `resourceType`, URLs du fournisseur, nom d'origine, type, taille, dimensions, durée, empreinte SHA-256, dossier logique | — |
+| `media_folders` | Dossiers de la médiathèque (arborescence, étiquettes en base) | — |
 
 ## Suppression logique
 
@@ -45,7 +49,7 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 
 ## Audit
 
-`audit_logs` : action (`CREATE`, `UPDATE`, `DELETE`, `RESTORE`, `LOGIN`), table et id de la
+`audit_logs` : action (`CREATE`, `UPDATE`, `DELETE`, `RESTORE`, `LOGIN`, `UPLOAD_FILE`, `DELETE_FILE`), table et id de la
 ressource, résumé des changements (jamais de mot de passe), IP, user-agent.
 `services/audit.service.js › record()` ne fait jamais échouer l'opération principale.
 Actuellement branché sur le login ; les CRUD l'utiliseront dès leur création.
@@ -65,6 +69,8 @@ chaque parent 1─n sa table de traductions                                     
 - Index de lecture : `events(status, startsAt)`, `news(status, publishedAt)`,
   `daily_messages(status, date)`, `notifications(status, scheduledAt)`,
   `media(type, status, createdAt)`, `contact_messages(isRead, createdAt)`, clés étrangères.
+- Index uniques partiels : `storage_files(provider, resourceType, checksum)` (dédoublonnage, envois `UPLOADING` ou `READY` non supprimés) et
+  `media_folders(parent, nom)` (parmi les dossiers actifs).
 - `CHECK` sur `service_schedules` : heures au format `HH:mm` valide.
 - Index de lecture incluant `deletedAt` ; `audit_logs` indexé par `(entity, entityId)`, `(adminId, createdAt)`, `createdAt`.
 
@@ -75,6 +81,8 @@ chaque parent 1─n sa table de traductions                                     
 | `20261120091524_init_admins` | Table `admins`, enum `Role` |
 | `20261120092905_data_model` | 15 tables, enums, index, contraintes `CHECK`, RLS |
 | `20261120100000_db_hardening` | UUID, `deletedAt`, enum `Weekday`, table `audit_logs`, index partiel de la date des messages, RLS |
+| `20261120120000_storage_file_status` | Statut des fichiers (`StorageFileStatus`), `url` / `secureUrl` facultatives, unicité de l'empreinte limitée aux envois en cours ou terminés |
+| `20261120110000_storage_files` | `storage_files`, `media_folders`, clés étrangères vers les fichiers (retrait de `coverImage` texte et des colonnes de fichier de `media`), enums `StorageProvider`, `StorageResourceType`, `MediaType.VIDEO`, actions d'audit de fichier, index partiels (empreinte, nom de dossier), RLS |
 
 ## Commandes
 
