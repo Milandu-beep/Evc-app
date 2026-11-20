@@ -1,7 +1,7 @@
 # EVC APP - PROJECT CHARTER
-Version : 1.1
+Version : 1.2
 Statut : Validé
-Historique : 1.1 (2026-11-20) — stockage migré vers Cloudflare R2 ; roadmap révisée (Sprints 2.5 et 3 à 12)
+Historique : 1.1 (2026-11-20) — roadmap révisée (Sprints 2.5 et 3 à 12) ; 1.2 (2026-11-20) — stockage : Cloudinary (images) + Supabase Storage (PDF, audio), Cloudflare R2 en évolution possible
 Projet : Plateforme officielle de l'Église Vie Céleste (EVC)
 
 ---
@@ -97,9 +97,13 @@ OneSignal
 
 ## Stockage
 
-Cloudflare R2 (voir docs/STORAGE_ARCHITECTURE.md)
+Via un service unique (StorageService) et des fournisseurs interchangeables :
 
-Supabase ne stocke jamais de fichiers : uniquement les métadonnées.
+- Cloudinary : images
+- Supabase Storage : PDF et audio
+- Cloudflare R2 : évolution possible, sans modifier la logique métier
+
+La base de données ne stocke que les métadonnées. Voir docs/STORAGE_ARCHITECTURE.md.
 
 ---
 
@@ -290,7 +294,7 @@ Sprint 2 — Modèle de données ✅
 
 Sprint 2.5 — Durcissement de la base (UUID, suppression logique, audit) ✅
 
-Sprint 3 — Stockage Cloudflare R2
+Sprint 3 — Stockage (StorageService, Cloudinary, Supabase Storage)
 
 Sprint 4 — Authentification avancée (permissions, rafraîchissement des tokens)
 
@@ -310,7 +314,7 @@ Sprint 11 — Site public
 
 Sprint 12 — PWA
 
-Déploiement : fin du Sprint 12 (Vercel, Railway ou VPS, Supabase, Cloudflare R2).
+Déploiement : fin du Sprint 12 (Vercel, Railway ou VPS, Supabase, Cloudinary).
 
 ---
 

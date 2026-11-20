@@ -1,95 +1,102 @@
-# Architecture du stockage — Cloudflare R2
+# Architecture du stockage
 
-Version : 1.0 — Statut : **proposé, en attente de validation**
-Référence : `PROJECT_CHARTER.md` §5 (Stockage) et §10 (Médiathèque).
+Version : 2.0 — Statut : **validé sur le principe (limites, nettoyage, originaux conservés)**
+Références : `PROJECT_CHARTER.md` §5 (Stockage) et §10 (Médiathèque).
 
 ## 1. Principes
 
-1. **Les fichiers vivent uniquement dans R2.** Supabase ne stocke que des métadonnées.
-2. **Le client ne parle jamais à R2 directement** : `Client → API → R2`. Les clés d'accès R2
-   n'existent que côté serveur.
-3. **Un fichier = une ligne `storage_files`**, référencée par les contenus (événement,
-   actualité, média…). Un même fichier peut servir à plusieurs contenus sans duplication.
-4. **Une clé d'objet est immuable.** Renommer ou ranger un fichier ne touche jamais R2 :
-   le rangement (dossiers) et les noms d'affichage vivent en base.
-5. **Aucune URL n'est stockée en base.** Elle est calculée à partir de `bucket` + `objectKey`
-   et de la configuration (voir §6). Changer de domaine CDN ne demande aucune migration.
-6. **Le fournisseur est abstrait** derrière une interface `StorageProvider` : changer de
-   fournisseur ne touche que l'implémentation.
+1. **Un service unique, `StorageService`.** Les contrôleurs et les autres services ne savent
+   pas où sont les fichiers : ils appellent `upload`, `delete`, `urlFor`.
+2. **Des fournisseurs interchangeables** derrière une interface :
+   `CloudinaryProvider` (images), `SupabaseStorageProvider` (PDF, audio),
+   `R2Provider` (futur, non implémenté en V1).
+3. **Le client ne parle jamais directement à un fournisseur** : `Client → API → fournisseur`.
+   Les secrets n'existent que côté serveur.
+4. **Un fichier = une ligne `storage_files`**, référencée par les contenus (événement,
+   actualité, média…). Un même fichier sert à plusieurs contenus sans duplication.
+5. **La base ne stocke que des métadonnées.** Aucune URL n'est stockée : elle est calculée à
+   partir du fournisseur et de l'identifiant (voir §6). Changer de domaine ou de fournisseur
+   ne demande pas de migration d'URLs.
+6. **Les clés sont immuables et non devinables** ; le rangement (dossiers) et les noms
+   d'affichage vivent en base.
 
-## 2. Buckets
+## 2. Répartition par type
 
-| Bucket | Contenu | Accès |
-|---|---|---|
-| `evc-images` | Photos, affiches, bannières, logos | Public (via domaine CDN) |
-| `evc-documents` | PDF | Public (via domaine CDN) |
-| `evc-audio` | MP3 | Public (via domaine CDN) |
-
-Pas de bucket vidéo en V1 : la charte limite les vidéos à YouTube (liens, pas de fichiers).
-Un bucket `evc-videos` pourra être ajouté plus tard sans changer le modèle.
-
-Les buckets sont publics en lecture car tout le contenu publié est public. La protection
-d'un brouillon repose sur des clés **non devinables** (UUID), pas sur une authentification.
-Si des fichiers réellement privés apparaissent un jour, ils iront dans un bucket privé avec
-URLs signées à durée limitée.
-
-Le listing des buckets n'est jamais exposé. Un bucket de développement et un de production
-sont séparés (`evc-dev-images`, …) pour qu'un test n'écrase jamais la production.
-
-## 3. Nommage des objets
-
-```
-{type}/{AAAA}/{MM}/{uuid}.{ext}      ex. images/2026/11/7c1e…b2.webp
-```
-
-- `uuid` = identifiant de la ligne `storage_files` (clé et base restent liées).
-- Extension déduite du **type réel détecté** du fichier, jamais du nom envoyé.
-- Le nom d'origine est conservé en base (`originalName`) pour l'affichage et le téléchargement,
-  assaini (pas de chemin, caractères de contrôle supprimés, longueur limitée).
-- Les « dossiers » de la médiathèque (Affiches, Prédications, Baptêmes…) ne sont **pas** des
-  préfixes R2 : ce sont des lignes `media_folders` (arborescence en base).
-
-## 4. Formats et limites
-
-| Type | Formats acceptés | Taille max | Traitement |
+| Type | Fournisseur | Conteneur | Pourquoi |
 |---|---|---|---|
-| Image | JPEG, PNG, WebP | 10 Mo | Rotation EXIF appliquée puis métadonnées EXIF supprimées (vie privée), dimensions max 4000 px, lecture de `width`/`height` |
-| PDF | `application/pdf` | 20 Mo | Aucun |
-| Audio | MP3 (`audio/mpeg`) | 100 Mo | Lecture de la durée |
+| Images (JPEG, PNG, WebP) | **Cloudinary** | dossier `evc/{AAAA}/{MM}/` | CDN, WebP/AVIF automatique, redimensionnement par l'URL (`w_1200,f_auto,q_auto`) : aucune variante à stocker |
+| PDF | **Supabase Storage** | bucket public `documents` | Compte déjà en place, pas de carte bancaire |
+| Audio MP3 | **Supabase Storage** | bucket public `audio` | idem |
+| Vidéos | **YouTube** (lien) | — | Charte §10 : pas de fichier vidéo en V1 |
 
+Le choix du fournisseur est une table de correspondance dans `config/storage.js`
+(type de fichier → fournisseur). Passer les PDF et l'audio sur R2 plus tard = écrire
+`R2Provider` et changer cette table ; les fichiers existants restent lisibles car chaque
+ligne `storage_files` mémorise son fournisseur.
+
+## 3. Formats et limites
+
+| Type | Formats | Taille max | Traitement avant envoi |
+|---|---|---|---|
+| Image | JPEG, PNG, WebP | 10 Mo | Rotation EXIF appliquée puis métadonnées EXIF supprimées (vie privée, GPS), lecture de `width`/`height`. Originaux conservés, sans variante |
+| PDF | `application/pdf` | 20 Mo | Aucun |
+| Audio | MP3 (`audio/mpeg`) | 50 Mo | Lecture de la durée |
+
+- Les 10 Mo des images correspondent à la limite d'envoi de l'offre gratuite Cloudinary ;
+  les 50 Mo de l'audio à celle de Supabase Storage (offre gratuite). Une offre payante
+  permet de les relever dans `config/constants.js`.
 - **SVG refusé** (peut contenir du script). GIF, HEIC, vidéo : hors V1.
-- Le type est **détecté par le contenu** (octets magiques), pas par l'en-tête
-  `Content-Type` ni l'extension, qui sont falsifiables.
-- Les limites sont dans `config/constants.js` ; Multer applique la limite pendant la
-  réception, avant d'écrire quoi que ce soit.
+- Le type est **détecté par le contenu** (octets magiques), jamais par `Content-Type` ni par
+  l'extension, falsifiables.
+- Multer applique la limite pendant la réception, avant tout envoi vers un fournisseur.
+- Conversion WebP/AVIF et miniatures : assurées à la livraison par Cloudinary
+  (`f_auto`, `w_…`), sans rien stocker de plus.
+
+## 4. Identifiants des objets
+
+```
+Cloudinary : publicId = evc/{AAAA}/{MM}/{uuid}          (sans extension)
+Supabase   : chemin   = {AAAA}/{MM}/{uuid}.{ext}        dans le bucket documents ou audio
+```
+
+- `uuid` = identifiant de la ligne `storage_files`.
+- Extension déduite du type réel détecté, jamais du nom envoyé.
+- Le nom d'origine est conservé en base (`originalName`), assaini (pas de chemin, pas de
+  caractères de contrôle, longueur limitée), pour l'affichage et le téléchargement.
+- Les dossiers de la médiathèque (Affiches, Prédications, Baptêmes…) sont des lignes
+  `media_folders`, **pas** des préfixes chez le fournisseur.
 
 ## 5. Flux d'envoi
 
 ```
 1. Authentification + rôle (Admin ou Super Admin) + limitation de débit
-2. Réception (Multer → fichier temporaire dans src/uploads/, nettoyé dans tous les cas)
-3. Détection du type réel, contrôle format et taille
-4. Traitement (image : rotation, EXIF, dimensions ; audio : durée)
+2. Réception (Multer → fichier temporaire dans src/uploads/, supprimé dans tous les cas)
+3. Détection du type réel, contrôle du format et de la taille
+4. Traitement (image : rotation + EXIF + dimensions ; audio : durée)
 5. Empreinte SHA-256
-   └─ si un fichier actif a la même empreinte et le même bucket → réutilisation (pas de doublon)
-6. Envoi vers R2 (clé générée), récupération de l'ETag
-7. Création de la ligne storage_files  (si la base échoue → l'objet R2 est supprimé)
+   └─ fichier actif identique (même empreinte) → réutilisation, pas de doublon
+6. Choix du fournisseur (table du §2) et envoi
+7. Création de la ligne storage_files  (si la base échoue → suppression chez le fournisseur)
 8. Audit (action CREATE, entité storage_files)
 ```
 
-La base et R2 n'ont pas de transaction commune : l'ordre « R2 d'abord, base ensuite, nettoyage
-en cas d'échec » garantit qu'on ne référence jamais un objet absent. Le cas inverse (objet
-sans ligne) est couvert par le nettoyage des orphelins (§8).
+Il n'y a pas de transaction commune entre la base et un fournisseur : l'ordre « fournisseur
+d'abord, base ensuite, nettoyage en cas d'échec » garantit qu'on ne référence jamais un
+objet absent. L'inverse (objet sans ligne) est couvert par le nettoyage du §8.
 
-## 6. URLs publiques et CDN
+## 6. URLs et CDN
 
-- Chaque bucket est relié à un **domaine personnalisé Cloudflare** (ex. `cdn.<domaine>`),
-  ce qui active le cache CDN. Le domaine `r2.dev` est réservé au développement (limité,
-  sans cache).
-- URL = `R2_PUBLIC_URL_<TYPE>` + `/` + `objectKey`, calculée par `storageService.urlFor(file)`.
-- Fichiers immuables (clé unique par fichier) : en-tête
-  `Cache-Control: public, max-age=31536000, immutable`.
-- Les téléchargements forcent un nom propre via `Content-Disposition` avec `originalName`.
+`storageService.urlFor(file, options)` calcule l'URL à la lecture :
+
+- **Cloudinary** : `https://res.cloudinary.com/{cloud}/image/upload/{transformations}/{publicId}`.
+  Par défaut `f_auto,q_auto` ; `options.width` ajoute `w_{n}`. CDN mondial inclus.
+- **Supabase** : `{SUPABASE_URL}/storage/v1/object/public/{bucket}/{chemin}`, envoyé avec
+  `Cache-Control: max-age=31536000` (fichiers immuables).
+- **R2 (futur)** : domaine personnalisé Cloudflare.
+
+Les buckets Supabase sont publics en lecture, car tout contenu publié est public. La
+confidentialité d'un brouillon repose sur des identifiants non devinables. Un fichier
+réellement privé irait dans un bucket privé avec URL signée à durée limitée.
 
 ## 7. Modèle de données (changements à venir)
 
@@ -97,8 +104,9 @@ sans ligne) est couvert par le nettoyage des orphelins (§8).
 
 ```
 storage_files
-  id (uuid) · provider (enum StorageProvider) · bucket · objectKey
-  originalName · mimeType · sizeBytes · checksumSha256 · etag
+  id (uuid) · provider (enum StorageProvider : CLOUDINARY, SUPABASE, R2)
+  bucket? (Supabase : documents|audio ; vide pour Cloudinary) · objectKey (publicId ou chemin)
+  originalName · mimeType · sizeBytes · checksumSha256 · etag?
   width? · height? · durationSeconds?
   uploadedById? → admins (SET NULL) · createdAt · deletedAt?
   unique (provider, bucket, objectKey)    index (checksumSha256)    index (deletedAt)
@@ -113,7 +121,7 @@ media_folders
 
 | Table | Avant | Après |
 |---|---|---|
-| `media` | `storagePath`, `url`, `mimeType`, `sizeBytes` | `storageFileId?` → `storage_files` (vide pour YOUTUBE), `folderId?` → `media_folders` ; `youtubeId` conservé |
+| `media` | `storagePath`, `url`, `mimeType`, `sizeBytes` | `storageFileId?` → `storage_files` (vide pour YOUTUBE), `folderId?` → `media_folders` ; `youtubeId` et `url` (lien YouTube uniquement) conservés selon le type |
 | `events` | `coverImage` (texte) | `coverImageId?` → `storage_files` |
 | `news` | `coverImage` (texte) | `coverImageId?` → `storage_files` |
 | `daily_messages` | — | `imageId?` → `storage_files` |
@@ -121,102 +129,94 @@ media_folders
 
 Toutes les relations vers `storage_files` sont `SET NULL` : supprimer un fichier ne supprime
 jamais un contenu. Les tables concernées sont vides, la migration est sans risque.
-
-### Écarts par rapport à la proposition initiale
-
-| Proposé | Décision | Raison |
-|---|---|---|
-| `public_url`, `cdn_url` en base | **Calculés**, non stockés | Évite une migration de données si le domaine change |
-| `storage_provider` : R2, S3, Azure, Google | Enum `R2`, `S3` | Une valeur se rajoute en une ligne de migration quand un 3e fournisseur devient réel |
-| `uploaded_at` | `createdAt` | Convention du projet |
-| `media_folders` nommés en fr/en | Un seul `name` | Dossiers internes à l'admin, saisis par les administrateurs |
-| `duration` sur toutes les tables | Sur `storage_files` seulement | Une seule source de vérité |
+`R2` est dans l'enum dès maintenant (aucun code derrière) pour éviter une migration plus tard.
 
 ## 8. Suppression et nettoyage
 
 - Supprimer un contenu **ne supprime pas** le fichier (il peut servir ailleurs).
 - Un fichier est **orphelin** s'il n'est référencé par aucune table (`events`, `news`,
   `daily_messages`, `media`, `church_settings`).
-- Tâche de nettoyage (planifiée, ou commande `npm run storage:cleanup`) :
-  1. Les orphelins de plus de **24 h** sont marqués `deletedAt` (délai laissé à un envoi
-     en cours de rattachement).
-  2. Les fichiers marqués depuis plus de **30 jours** sont supprimés de R2, puis de la base.
-  3. Les objets R2 sans ligne en base (échec entre les étapes 6 et 7) sont détectés par
-     comparaison du listing R2 et de la base, puis supprimés.
-- Toute suppression passe par `storageService` et est tracée dans `audit_logs`.
-- Une erreur R2 pendant le nettoyage est loggée et réessayée au passage suivant, jamais
-  bloquante.
+- Nettoyage (`npm run storage:cleanup`, planifiable) :
+  1. Orphelins de plus de **24 h** → marqués `deletedAt`.
+  2. Fichiers marqués depuis plus de **30 jours** → supprimés chez le fournisseur
+     (Cloudinary : `destroy` avec invalidation du cache), puis de la base.
+  3. Objets présents chez le fournisseur sans ligne en base (échec entre les étapes 6 et 7)
+     → détectés par comparaison du listing et de la base, puis supprimés.
+- Toute suppression passe par `StorageService` et est tracée dans `audit_logs`.
+- Une erreur d'un fournisseur pendant le nettoyage est loggée et réessayée au passage
+  suivant, jamais bloquante.
 
 ## 9. Sécurité
 
 - Seuls Admin et Super Admin envoient ; seul le Super Admin lance un nettoyage manuel.
-- Clés R2 limitées à un jeton d'API **par bucket** (lecture/écriture/suppression, pas de
-  gestion de compte), uniquement en variables d'environnement, jamais dans le dépôt.
-- Détection de type par le contenu, limites de taille, pas de SVG, EXIF supprimé.
+- Secrets uniquement en variables d'environnement, jamais dans le dépôt ni envoyés au client.
+- **Attention** : `SUPABASE_SERVICE_ROLE_KEY` donne un accès total au projet Supabase
+  (elle contourne la RLS). Elle ne doit exister que sur le serveur, jamais dans le
+  frontend (`admin/`, `client/`). Seul `StorageService` l'utilise, et uniquement pour le
+  stockage.
+- Détection de type par le contenu, limites de taille, SVG refusé, EXIF supprimé.
 - Limitation de débit sur les envois (en plus de celle du login).
-- Noms de fichiers d'origine assainis et jamais utilisés dans la clé.
-- CORS des buckets limité aux domaines de l'application (lecture uniquement, `GET`/`HEAD`).
+- Noms d'origine assainis, jamais utilisés dans les identifiants d'objets.
 - Chaque envoi, rattachement et suppression est écrit dans `audit_logs`.
 
 ## 10. Structure du code
 
 ```
 src/
-  config/storage.js              buckets, limites, formats autorisés
+  config/storage.js               fournisseur par type, limites, formats autorisés
   services/storage/
-    storage.service.js           orchestration (flux §5, suppression, nettoyage)
-    providers/r2.provider.js     implémentation S3-compatible (@aws-sdk/client-s3)
-    providers/provider.js        interface : put / delete / exists / list
-    image.processor.js           rotation, EXIF, dimensions (sharp)
-    file-type.js                 détection par contenu
-  middleware/upload.js           Multer + limites
+    storage.service.js            orchestration : flux §5, urlFor, suppression, nettoyage
+    providers/provider.js         interface : put / delete / list / urlFor
+    providers/cloudinary.provider.js
+    providers/supabase.provider.js
+    image.processor.js            rotation, EXIF, dimensions (sharp)
+    file-type.js                  détection par contenu
+  middleware/upload.js            Multer + limites
   utils/checksum.js
 ```
 
-Dépendances à ajouter : `@aws-sdk/client-s3`, `sharp`, `file-type`, `music-metadata`
-(durée audio). `multer` est déjà installé.
+Dépendances à ajouter : `cloudinary`, `@supabase/supabase-js`, `sharp`, `file-type`,
+`music-metadata` (durée audio). `multer` est déjà installé.
 
 ## 11. Variables d'environnement
 
 ```
-R2_ACCOUNT_ID=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-R2_BUCKET_IMAGES=
-R2_BUCKET_DOCUMENTS=
-R2_BUCKET_AUDIO=
-R2_PUBLIC_URL_IMAGES=       # https://cdn.exemple.org  (ou URL r2.dev en développement)
-R2_PUBLIC_URL_DOCUMENTS=
-R2_PUBLIC_URL_AUDIO=
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+
+SUPABASE_URL=                    # https://<projet>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=       # serveur uniquement
+SUPABASE_BUCKET_DOCUMENTS=documents
+SUPABASE_BUCKET_AUDIO=audio
 ```
 
 ## 12. Livrable du Sprint 3
 
-- Migration : `storage_files`, `media_folders`, nouvelles clés étrangères, retrait des
-  anciennes colonnes, RLS sur les nouvelles tables.
-- Services de stockage (envoi, suppression, URLs, nettoyage) et middleware d'envoi.
-- Routes techniques `POST /api/storage/upload`, `DELETE /api/storage/:id` (Admin / Super Admin),
-  sans logique métier d'événement ou d'actualité.
-- Tests sur un bucket de développement réel : envoi de chaque type, refus d'un faux format,
-  refus d'un fichier trop gros, dédoublonnage, échec base → nettoyage R2, nettoyage des
-  orphelins.
+- Migration : `storage_files`, `media_folders`, clés étrangères, retrait des anciennes
+  colonnes, RLS sur les nouvelles tables.
+- `StorageService` et les deux fournisseurs, middleware d'envoi, nettoyage.
+- Routes techniques `POST /api/storage/upload` et `DELETE /api/storage/:id`
+  (Admin / Super Admin), sans logique métier d'événement ou d'actualité.
+- Tests réels : envoi de chaque type, refus d'un faux format, refus d'un fichier trop gros,
+  dédoublonnage, échec base → nettoyage chez le fournisseur, nettoyage des orphelins.
 - Documentation (`API.md`, `DATABASE.md`).
 
-## 13. Prérequis côté Cloudflare (à faire par vous)
+## 13. Prérequis à fournir (par vous)
 
-1. Compte Cloudflare avec **R2 activé** (une carte bancaire est demandée ; l'offre gratuite
-   couvre 10 Go et un volume de requêtes large, sans frais de sortie).
-2. Créer les buckets de développement : `evc-dev-images`, `evc-dev-documents`, `evc-dev-audio`.
-3. Créer un jeton d'API R2 (lecture et écriture sur ces buckets) et noter l'identifiant de
-   compte, la clé d'accès et la clé secrète.
-4. Activer l'accès public via `r2.dev` sur ces buckets (développement uniquement).
-5. Plus tard, pour la production : un nom de domaine à rattacher à Cloudflare.
+**Cloudinary** (gratuit, sans carte bancaire)
+1. Créer un compte sur cloudinary.com.
+2. Dans le tableau de bord, relever `Cloud name`, `API Key` et `API Secret`
+   (Settings → API Keys).
 
-## 14. Points à valider
+**Supabase Storage** (projet existant)
+1. Dans Storage, créer deux buckets **publics** : `documents` et `audio`.
+2. Relever l'URL du projet et la clé `service_role` (Settings → API Keys).
 
-1. Limites : images 10 Mo, PDF 20 Mo, audio 100 Mo — correctes ?
-2. Images : conversion en WebP et variantes (miniature, moyenne) à l'envoi, ou originaux
-   conservés tels quels en V1 ? (Je recommande **originaux nettoyés en V1**, variantes en
-   évolution : la table et les clés n'ont pas besoin de changer.)
-3. Délais de nettoyage : 24 h (orphelins) puis 30 jours (suppression R2) — convient ?
-4. Un nom de domaine existe-t-il déjà pour le CDN de production ?
+Les valeurs vont dans `server/.env` ; ne les envoyez pas dans la conversation.
+
+## 14. Évolution vers Cloudflare R2
+
+Écrire `R2Provider` (API compatible S3), l'ajouter à la table du §2, déplacer au besoin
+les fichiers existants par un script (le champ `provider` indique d'où chacun vient).
+Aucun contrôleur ni table métier ne change.
