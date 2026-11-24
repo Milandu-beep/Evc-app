@@ -87,8 +87,9 @@ Authentification requise. Retourne le profil de l'administrateur connecté (mêm
 
 ## Tests
 
-`npm test` lance toutes les suites d'intégration l'une après l'autre (`auth`, `storage.stub`, `events`, `news`, `dailyMessages`, `gallery`,
-`people`, `sermons`, `notifications`) et échoue s'il y a un seul « KO ». Elles utilisent la **vraie base** désignée par `.env` et le compte
+`npm test` lance toutes les suites l'une après l'autre (`auth`, `storage.stub`, `events`, `news`, `dailyMessages`, `gallery`,
+`people`, `sermons`, `notifications`, `dashboard.rules`, `dashboard`) et échoue s'il y a un seul « KO ». `dashboard.rules` est une suite de tests
+unitaires (fonctions pures, sans base) ; les autres sont des tests d'intégration. Elles utilisent la **vraie base** désignée par `.env` et le compte
 `SEED_ADMIN_*`, puis suppriment ce qu'elles ont créé ; elles **refusent de démarrer avec `NODE_ENV=production`**. Ne jamais les interrompre en cours
 de route (elles laisseraient des données de test) ; la suite `notifications` exige une table des notifications vide.
 `npm run test:<module>` lance une seule suite. `npm run test:storage:cloudinary` (vrais envois, crédits consommés) n'est pas inclus dans `npm test`.
@@ -705,3 +706,18 @@ ancienne et nouvelle date, identifiant chez le fournisseur, prochaine tentative�
 
 Entité `notifications` : `CREATE` (manuelle ou automatique, sans administrateur), `UPDATE` (noms de champs, **jamais les textes**), `STATUS_CHANGE`
 (`schedule`/`rescheduled`, `cancel` avec motif, `retry`), `DELETE`, `RESTORE`.
+
+## Tableau de bord
+
+Contrat complet (indicateurs, alertes, agenda, activité) : **`DASHBOARD.md`**. Lecture seule, rôles Admin et Super Admin, `Cache-Control: no-store`.
+
+| Méthode | Route | Description |
+|---|---|---|
+| GET | `/admin/dashboard` | `lang` (`fr`, `en` ; sinon `Accept-Language`), `days` (agenda, 1 à 31, défaut 7). Réponse : `generatedAt`, `timeZone`, `today` (jour de l'église), `language`, `summary`, `alerts`, `agenda` |
+| GET | `/admin/dashboard/activity` | Journal d'audit, du plus récent au plus ancien : `page`, `limit` (1 à 100, défaut 20), `entity`, `action`, `adminId`, `from`, `to` (ISO 8601). Liste paginée (`meta`) |
+
+- Les compteurs par état sont **identiques** aux totaux des listes d'administration filtrées sur le même état (`GET /admin/events?state=ENDED`…).
+- `summary.admins` et les lignes de l'entité `admins` de l'activité sont **réservés au Super Admin** ; pour un Admin, `entity=admins` répond **403**.
+- Les alertes sont des **codes** (`DAILY_MESSAGES_MISSING`, `NOTIFICATIONS_FAILED`, `NOTIFICATIONS_LATE`, `NOTIFICATIONS_PROVIDER_DISABLED`,
+  `SCHEDULER_LATE`, `STORAGE_UPLOADS_STUCK`) avec une gravité (`critical`, `warning`, `info`) : le texte affiché est traduit par le frontend.
+- L'activité ne contient jamais l'adresse IP ni le navigateur ; `admin` vaut `null` pour une action automatique (publication programmée).
