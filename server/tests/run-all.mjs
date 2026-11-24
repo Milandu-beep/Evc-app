@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SUITES = [
-  "auth", "storage.stub", "events", "news", "dailyMessages", "gallery", "people", "sermons", "notifications",
+  "auth", "storage.stub", "events", "news", "dailyMessages", "gallery", "people", "sermons", "notifications", "dashboard.rules",
 ];
 const only = process.argv.slice(2);
 const suites = only.length ? SUITES.filter((s) => only.includes(s)) : SUITES;
