@@ -1,3 +1,4 @@
+import "./helpers/safety.mjs";
 // Test d'intégration du module Actualités : API HTTP réelle + vraie base de données.
 // Aucun appel à Cloudinary. Utilise le compte SEED_ADMIN_* ; supprime tout ce qu'il crée.
 // Lancer : npm run test:news

@@ -1,3 +1,4 @@
+import "./helpers/safety.mjs";
 import "dotenv/config";
 import sharp from "sharp";
 import { readdirSync } from "node:fs";

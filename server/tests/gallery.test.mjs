@@ -1,3 +1,4 @@
+import "./helpers/safety.mjs";
 // Test d'intégration de la Galerie : API HTTP réelle (dont l'import multiple en multipart) + vraie base.
 // Le stockage utilise un FAUX fournisseur (aucun appel à Cloudinary). Utilise le compte SEED_ADMIN_* ;
 // supprime tout ce qu'il crée.   Lancer : npm run test:gallery

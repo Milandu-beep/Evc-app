@@ -33,8 +33,17 @@ Tous les identifiants de ressources sont des **UUID** (chaînes). Un id mal form
 
 ## Authentification
 
-Le token JWT est envoyé dans l'en-tête `Authorization: Bearer <token>`.
-Durée de validité : `JWT_EXPIRES_IN` (7 jours par défaut).
+Le token JWT est envoyé dans l'en-tête `Authorization: Bearer <token>` (le cookie n'est pas accepté).
+Durée de validité : `JWT_EXPIRES_IN` (7 jours par défaut). Algorithme imposé : HS256.
+
+**Le compte est relu en base à chaque requête authentifiée** : un administrateur désactivé (`isActive = false`) ou supprimé
+perd son accès **immédiatement** (401 « Compte introuvable ou désactivé »), sans attendre l'expiration de son token.
+Le rôle pris en compte est celui de la base, pas celui inscrit dans le token.
+
+**Configuration de production** (le serveur refuse de démarrer sinon) : `JWT_SECRET` d'au moins 32 caractères
+(ex. `openssl rand -base64 48`) et `CORS_ORIGIN` renseigné. Derrière un proxy ou un équilibreur, renseigner `TRUST_PROXY`
+(nombre de proxys de confiance, `loopback` ou plage CIDR ; `true` est refusé) : sinon toutes les requêtes semblent venir de la même
+adresse IP (limiteurs de débit et journal d'audit faussés).
 Il n'y a pas d'inscription publique : les comptes sont créés par le Super Admin
 (premier compte : `npm run seed`).
 
@@ -46,6 +55,9 @@ Corps :
 ```json
 { "email": "admin@example.com", "password": "motdepasse" }
 ```
+
+L'email est comparé tel quel (espaces retirés, mis en minuscules) : aucune « normalisation » propre à un fournisseur n'est appliquée
+(les points et le `+tag` d'une adresse Gmail comptent).
 
 Réponse 200 :
 ```json
@@ -71,7 +83,15 @@ ou le compte désactivé), 422 (champs invalides), 429.
 ### GET `/auth/me`
 
 Authentification requise. Retourne le profil de l'administrateur connecté (même objet
-`admin` que ci-dessus). Erreurs : 401 (token absent, invalide, expiré, ou compte désactivé).
+`admin` que ci-dessus). Erreurs : 401 (token absent, invalide, expiré, ou compte désactivé ou supprimé). Cette règle s'applique à **toutes** les routes d'administration.
+
+## Tests
+
+`npm test` lance toutes les suites d'intégration l'une après l'autre (`auth`, `storage.stub`, `events`, `news`, `dailyMessages`, `gallery`,
+`people`, `sermons`, `notifications`) et échoue s'il y a un seul « KO ». Elles utilisent la **vraie base** désignée par `.env` et le compte
+`SEED_ADMIN_*`, puis suppriment ce qu'elles ont créé ; elles **refusent de démarrer avec `NODE_ENV=production`**. Ne jamais les interrompre en cours
+de route (elles laisseraient des données de test) ; la suite `notifications` exige une table des notifications vide.
+`npm run test:<module>` lance une seule suite. `npm run test:storage:cloudinary` (vrais envois, crédits consommés) n'est pas inclus dans `npm test`.
 
 ## Santé
 
@@ -629,9 +649,59 @@ par le frontend aux moments voulus : un `GET` ne compte rien (il est mis en cach
 - L'incrément est **atomique** en base (aucune perte en cas de requêtes simultanées) ; les prédications non publiées, supprimées ou
   inconnues répondent 404. Limite : 120 requêtes par minute et par IP.
 - **Limites connues** : l'anti-doublon est en **mémoire** (une seule instance du serveur ; au redémarrage il repart de zéro) ; derrière un
-  proxy ou un équilibreur il faudra configurer `trust proxy` pour que l'adresse IP soit celle du visiteur et non celle du proxy.
+  proxy ou un équilibreur il faut renseigner `TRUST_PROXY` (voir « Authentification ») pour que l'adresse IP soit celle du visiteur et non celle du proxy.
 
 ### Audit
 
 Entités `sermons`, `sermon_documents`, `sermon_series`, `people` : `CREATE`, `UPDATE` (champs, tags, intervenants avant/après ; **jamais les textes**),
 `STATUS_CHANGE`, `DELETE`, `RESTORE`. La bascule programmée est écrite sans administrateur (`reason: "scheduled"`).
+
+## Notifications
+
+Architecture, fournisseurs, fiabilité et configuration : **`NOTIFICATIONS.md`**. Les notifications des contenus sont créées automatiquement (événements de domaine) ;
+cette section décrit l'administration. Rôles : Admin et Super Admin.
+
+### Notification
+
+| Champ | Description |
+|---|---|
+| `type` | `GENERAL`, `EVENT`, `NEWS`, `DAILY_MESSAGE`, `SERMON`, `TEST` (déduit du contenu lié) |
+| `status` | `DRAFT`, `SCHEDULED`, `SENDING`, `SENT`, `FAILED`, `CANCELLED` |
+| `audience` | `ALL` (défaut), `ADMINS`, `MEMBERS`, `VISITORS` |
+| `translations.<fr\|en>` | `title` (≤ 80), `message` (≤ 240), `url` facultatif : chemin `/events/…` ou adresse `http(s)://…`. **Français obligatoire** |
+| `eventId` / `newsId` / `dailyMessageId` / `sermonId` | Contenu lié (un seul) : fixe le `type` ; la notification est annulée si le contenu n'est plus publié au moment de l'envoi |
+| `scheduledAt` | Date d'envoi (ISO 8601, pas dans le passé). Fournie à la création : directement `SCHEDULED` |
+
+Lecture : `scheduledAt`, `sentAt`, `provider`, `providerMessageId`, `recipients`, `attempts`, `lastAttemptAt`, `errorMessage`, `automatic` (créée par un événement de domaine), `links`.
+
+### Routes
+
+| Méthode | Route | Rôle |
+|---|---|---|
+| GET | `/admin/notifications` | Liste : `q` (titre, message), `status`, `type`, `audience`, `from`, `to` (date de création), `deleted`, `sort` (`createdAt`, `scheduledAt`, `sentAt` ; dates vides en dernier), `order`, `page`, `limit` |
+| POST | `/admin/notifications` | Création manuelle (brouillon, ou planifiée si `scheduledAt`) |
+| GET | `/admin/notifications/:id` | Détail avec l'**historique** complet (`history`) |
+| GET | `/admin/notifications/:id/history` | Historique paginé |
+| PATCH | `/admin/notifications/:id` | Modifie audience et textes (brouillon ou planifiée ; `translations.en: null` retire une langue) |
+| POST | `/admin/notifications/:id/schedule` | `{ "scheduledAt": "…" }` : planifie ou **replanifie** (historique `RESCHEDULED`) |
+| POST | `/admin/notifications/:id/send` | Envoyer maintenant (planifiée à l'instant ; prise au prochain passage de l'expéditeur, ≤ 30 s) |
+| POST | `/admin/notifications/:id/cancel` | `{ "reason": "…" }` facultatif : annule un brouillon ou une planifiée (409 si envoyée ou en cours) |
+| POST | `/admin/notifications/:id/retry` | Relance une notification `FAILED` ou `CANCELLED` (tentatives remises à zéro) |
+| DELETE · POST | `/admin/notifications/:id` · `/:id/restore` | Suppression logique (refusée si planifiée ou en cours : annuler d'abord) / restauration |
+| GET | `/admin/notifications/provider` | `{ provider, enabled }` : état du fournisseur (jamais de clé) |
+| POST | `/admin/notifications/test` | **Notification de test** (voir ci-dessous) |
+| GET | `/notifications/config` | Public : `{ enabled, provider, appId?, languages, audiences }` (l'identifiant d'application OneSignal est public ; il n'apparaît que lorsque OneSignal est actif) |
+
+**Test** — `POST /admin/notifications/test` avec `{}` ou `{ "language": "en", "title": "…", "message": "…" }` : envoie tout de suite à l'audience `ADMINS`,
+sans file d'attente. **201** avec la notification (statut `SENT`) et son historique ; **503** si le fournisseur est désactivé (aucune clé configurée) ;
+**502** si le fournisseur refuse (la tentative reste visible, statut `FAILED`).
+
+### Historique (`history[]`)
+
+`event` (`CREATED`, `SCHEDULED`, `RESCHEDULED`, `SENDING`, `SENT`, `RETRY`, `FAILED`, `CANCELLED`), `status` résultant, `message` (motif), `attempt`, `data` (détails sans secret :
+ancienne et nouvelle date, identifiant chez le fournisseur, prochaine tentative…), `adminId` (vide = automatique), `createdAt`.
+
+### Audit
+
+Entité `notifications` : `CREATE` (manuelle ou automatique, sans administrateur), `UPDATE` (noms de champs, **jamais les textes**), `STATUS_CHANGE`
+(`schedule`/`rescheduled`, `cancel` avec motif, `retry`), `DELETE`, `RESTORE`.

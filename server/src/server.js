@@ -3,6 +3,8 @@ import app from "./app.js";
 import prisma from "./config/prisma.js";
 import logger from "./utils/logger.js";
 import { startScheduler, stopScheduler } from "./services/content/scheduler.js";
+import { registerNotificationListeners } from "./services/notifications/notification.listeners.js";
+import { startNotificationScheduler, stopNotificationScheduler } from "./services/notifications/notification.scheduler.js";
 
 async function start() {
   try {
@@ -16,9 +18,14 @@ async function start() {
     // Publication programmée des événements et actualités (désactivable : SCHEDULER_ENABLED=false)
     if (process.env.SCHEDULER_ENABLED !== "false") startScheduler();
 
+    // Notifications : abonnement aux événements de domaine (toujours) et envoi des notifications dues (désactivable avec le planificateur)
+    registerNotificationListeners();
+    if (process.env.SCHEDULER_ENABLED !== "false") startNotificationScheduler();
+
     const shutdown = (signal) => {
       logger.info(`${signal} reçu, arrêt en cours...`);
       stopScheduler();
+      stopNotificationScheduler();
       server.close(async () => {
         await prisma.$disconnect();
         process.exit(0);

@@ -53,6 +53,10 @@ export async function tags() {
 // Ajout de médias à un album. Un même fichier ne figure qu'une fois par album.
 // Retourne { created, skipped } : les doublons sont signalés, jamais une erreur.
 // ---------------------------------------------------------------------------
+// Transactions qui traitent jusqu'à 20 fichiers (plusieurs requêtes chacun) : le délai par défaut de Prisma (5 s)
+// est dépassé dès que la base répond lentement (base distante), ce qui annulait tout l'import avec une erreur 500.
+const LOOP_TRANSACTION = { maxWait: 10_000, timeout: 60_000 };
+
 async function createItems(albumId, files, tags, req) {
   const created = [];
   const skipped = [];
@@ -72,7 +76,7 @@ async function createItems(albumId, files, tags, req) {
       position += 1;
       created.push(item);
     }
-  });
+  }, LOOP_TRANSACTION);
   if (created.length) {
     await auditService.record({
       action: "CREATE",
@@ -213,7 +217,7 @@ export async function move(itemIds, toAlbumId, req) {
         position += 1;
       }
     }
-  });
+  }, LOOP_TRANSACTION);
 
   if (moved.length) {
     await auditService.record({

@@ -28,7 +28,8 @@ PostgreSQL (Supabase), via Prisma 7. Source de vérité : `server/prisma/schema.
 | `events` | Événements : type (`EventType`), capacité, inscrits (`registeredCount`), couleur, icône, statut (`EventStatus`), dates, publication programmée (`publishAt`), `publishedAt`, `cancelledAt`, image de couverture, vedette, inscription (`registrationRequired`, `registrationUrl`), `notifyOnPublish` | `event_translations` : slug, titre, description, lieu |
 | `news` | Actualités : statut (`NewsStatus` : brouillon, programmé, publié, archivé), `publishAt`, `publishedAt`, vedette, `notifyOnPublish`, image de couverture | `news_translations` : slug, titre, extrait, contenu |
 | `daily_messages` | Message du jour : `date` (une seule ligne **active** par date), statut (`DailyMessageStatus`), `publishAt`, `publishedAt`, `sendNotification`, image | `daily_message_translations` : titre, contenu, `verseReference`, `verseText`, `theme`, `estimatedReadingTime` (calculé), `notificationTitle`, `notificationBody` |
-| `notifications` | Notifications OneSignal (statut, planification, lien facultatif vers événement / actualité / message) | `notification_translations` : titre, message |
+| `notifications` | Notifications (voir `NOTIFICATIONS.md`) : type (`EVENT`, `NEWS`, `DAILY_MESSAGE`, `SERMON`, `GENERAL`, `TEST`), statut (`DRAFT`, `SCHEDULED`, `SENDING`, `SENT`, `FAILED`, `CANCELLED`), **audience** (`ALL`, `ADMINS`, `MEMBERS`, `VISITORS`), planification, tentatives, fournisseur et identifiant du message, destinataires, **`dedupeKey` unique** (une notification automatique par contenu et par événement), liens vers événement / actualité / message du jour / prédication | `notification_translations` : titre, message, lien d'ouverture |
+| `notification_logs` | **Historique** append-only des notifications : `CREATED`, `SCHEDULED`, `RESCHEDULED`, `SENDING`, `SENT`, `RETRY`, `FAILED`, `CANCELLED`, avec statut résultant, motif, tentative, détails du fournisseur (sans secret) et administrateur (vide = automatique) | — |
 | `media` | Médiathèque : `IMAGE`, `PDF`, `AUDIO`, `YOUTUBE` | `media_translations` : titre, description |
 | `church_settings` | Paramètres de l'église (ligne unique, id = 1) : contact, réseaux | `church_setting_translations` : slogan, mission, adresse, repères |
 | `service_schedules` | Horaires de culte (`dayOfWeek` enum `Weekday`, `HH:mm`) | `service_schedule_translations` : libellé |
@@ -80,6 +81,7 @@ chaque parent 1─n sa table de traductions                                     
   `media_folders(parent, nom)` (parmi les dossiers actifs).
 - `CHECK` sur `events` : `endsAt >= startsAt` ; `SCHEDULED` exige `publishAt` ; `registrationUrl` en `http(s)://`.
 - `CHECK` sur `events` : `capacity > 0` ; `registeredCount >= 0` et `<= capacity` ; `color` en `#rrggbb` ; `icon` en minuscules et tirets.
+- Notifications : `CHECK` — planifiée exige `scheduledAt`, envoyée exige `sentAt`, `attempts >= 0` ; `dedupeKey` unique.
 - Prédications : `CHECK` — vidéo hébergée **ou** YouTube (pas les deux), identifiant YouTube de 11 caractères, compteurs ≥ 0, numéro de série ≥ 1, 20 tags et 10 versets au plus, programmée exige `publishAt` ; unicité `(sermonId, personId, role)` et `(sermonId, storageFileId)`.
 - Galerie : index unique partiel `gallery_items(albumId, storageFileId)` (un fichier par album actif) ; `CHECK` : `position >= 0`, 20 tags au plus, slug d'album valide.
 - `CHECK` sur `daily_messages` : `SCHEDULED` exige `publishAt` ; sur `daily_message_translations` : `estimatedReadingTime >= 1`.
@@ -95,6 +97,7 @@ chaque parent 1─n sa table de traductions                                     
 | `20261120091524_init_admins` | Table `admins`, enum `Role` |
 | `20261120092905_data_model` | 15 tables, enums, index, contraintes `CHECK`, RLS |
 | `20261120100000_db_hardening` | UUID, `deletedAt`, enum `Weekday`, table `audit_logs`, index partiel de la date des messages, RLS |
+| `20261120180000_notifications` | `notifications` étendue (audience `NotificationAudience`, statuts `SENDING` / `CANCELLED`, type `SERMON` / `TEST`, `provider`, `providerMessageId` (ex-`oneSignalId`), `recipients`, `attempts`, `lastAttemptAt`, `dedupeKey`, `sermonId`), lien d'ouverture par langue, table `notification_logs` (enum `NotificationLogEvent`), contraintes `CHECK`, RLS |
 | `20261120170000_sermons_and_people` | `people`, séries, prédications, intervenants avec rôle, documents (9 tables), enums `PersonCategory`, `SpeakerRole`, `SermonStatus`, index GIN (tags, catégories), contraintes `CHECK`, RLS |
 | `20261120160000_gallery` | Albums et médias de galerie (4 tables), enum `GalleryItemType`, index GIN sur les tags, index partiels (un fichier par album actif), contraintes `CHECK`, RLS |
 | `20261120150000_daily_messages` | Messages du jour : enum `DailyMessageStatus`, `publishAt`, `publishedAt`, `sendNotification` ; traductions : `verseReference` (ex-`bibleReference`), `verseText`, `theme`, `estimatedReadingTime`, `notificationTitle`, `notificationBody` ; contraintes `CHECK` |
@@ -115,3 +118,5 @@ npx prisma studio            # explorer les données
 ```
 
 > Les tables `media` et `media_folders` (Sprint 2) ne sont pas utilisées par la galerie : elles seront reprises pour les Prédications.
+
+> Les index GIN et les index partiels créés à la main (tags, catégories, dates actives…) ne sont pas connus de Prisma : `prisma migrate diff` propose de les supprimer ; **retirer ces lignes** de chaque nouvelle migration générée.

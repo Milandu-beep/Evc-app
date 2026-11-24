@@ -62,6 +62,13 @@ export function localDateString(date, timeZone) {
 // « AAAA-MM-JJ » -> Date à minuit UTC : c'est ce que Prisma attend pour une colonne @db.Date.
 export const dateOnlyToUtc = (str) => new Date(`${str}T00:00:00.000Z`);
 
+// Instant UTC correspondant à « AAAA-MM-JJ » à l'heure locale « HH:MM » du fuseau.
+export function localDateTimeToUtc(str, hhmm, timeZone) {
+  const [y, m, d] = str.split("-").map(Number);
+  const [h, mi] = hhmm.split(":").map(Number);
+  return new Date(localMidnight(y, m, d, timeZone).getTime() + (h * 60 + mi) * 60 * 1000);
+}
+
 // Fin (23:59:59.999) du jour local « AAAA-MM-JJ ».
 export function endOfLocalDateString(str, timeZone) {
   const [y, m, d] = str.split("-").map(Number);

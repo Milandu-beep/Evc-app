@@ -1,3 +1,4 @@
+import "./helpers/safety.mjs";
 // Test d'intégration RÉEL : envoie de vrais fichiers vers Cloudinary (racine EVC-dev), ouvre les URL
 // renvoyées, vérifie la suppression, puis nettoie tout ce qu'il a créé.
 // Utilise la vraie base et le compte SEED_ADMIN_*. Consomme quelques crédits gratuits.

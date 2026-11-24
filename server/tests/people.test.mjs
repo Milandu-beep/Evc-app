@@ -1,3 +1,4 @@
+import "./helpers/safety.mjs";
 // Test d'intégration du module Personnes (table générique) : API HTTP réelle + vraie base.
 // Aucun appel à Cloudinary. Utilise le compte SEED_ADMIN_* ; supprime tout ce qu'il crée.
 // Lancer : npm run test:people

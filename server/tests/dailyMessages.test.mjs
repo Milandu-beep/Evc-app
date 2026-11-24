@@ -1,3 +1,4 @@
+import "./helpers/safety.mjs";
 // Test d'intégration du module Messages du jour : API HTTP réelle + vraie base de données.
 // Aucun appel à Cloudinary. Utilise le compte SEED_ADMIN_* ; supprime tout ce qu'il crée.
 // ATTENTION : la base ne doit contenir aucun autre message du jour (le repli « dernier message publié »

@@ -54,6 +54,8 @@ enum NotificationType {
   EVENT
   NEWS
   DAILY_MESSAGE
+  SERMON
+  TEST
 }
 
 // Cycle de vie d'un événement. « Terminé » n'est pas stocké : il se déduit des dates
@@ -173,11 +175,34 @@ enum AuditAction {
   STATUS_CHANGE
 }
 
+// Cycle de vie d'une notification : DRAFT -> SCHEDULED -> SENDING -> SENT, ou FAILED (échecs épuisés) ou CANCELLED
 enum NotificationStatus {
   DRAFT
   SCHEDULED
+  SENDING
   SENT
   FAILED
+  CANCELLED
+}
+
+// Catégories de destinataires. Le fournisseur les traduit en segments (voir docs/NOTIFICATIONS.md).
+enum NotificationAudience {
+  ALL
+  ADMINS
+  MEMBERS
+  VISITORS
+}
+
+// Événements de l'historique d'une notification
+enum NotificationLogEvent {
+  CREATED
+  SCHEDULED
+  RESCHEDULED
+  SENDING
+  SENT
+  RETRY
+  FAILED
+  CANCELLED
 }
 
 // ----------------------------------------------------------------------------
@@ -197,18 +222,19 @@ model Admin {
   deletedAt DateTime?
   updatedAt DateTime  @updatedAt
 
-  events        Event[]
-  news          News[]
-  dailyMessages DailyMessage[]
-  notifications Notification[]
-  media         Media[]
-  auditLogs     AuditLog[]
-  storageFiles  StorageFile[]
-  galleryAlbums GalleryAlbum[]
-  galleryItems  GalleryItem[]
-  people        Person[]
-  sermonSeries  SermonSeries[]
-  sermons       Sermon[]
+  events           Event[]
+  news             News[]
+  dailyMessages    DailyMessage[]
+  notifications    Notification[]
+  media            Media[]
+  auditLogs        AuditLog[]
+  storageFiles     StorageFile[]
+  galleryAlbums    GalleryAlbum[]
+  galleryItems     GalleryItem[]
+  people           Person[]
+  sermonSeries     SermonSeries[]
+  sermons          Sermon[]
+  notificationLogs NotificationLog[]
 
   @@map("admins")
 }
@@ -387,26 +413,36 @@ model DailyMessageTranslation {
 // ----------------------------------------------------------------------------
 
 model Notification {
-  id             String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  type           NotificationType   @default(GENERAL)
-  status         NotificationStatus @default(DRAFT)
-  scheduledAt    DateTime?
-  sentAt         DateTime?
-  oneSignalId    String? // identifiant retourné par OneSignal après envoi
-  errorMessage   String?
+  id                String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type              NotificationType     @default(GENERAL)
+  audience          NotificationAudience @default(ALL)
+  status            NotificationStatus   @default(DRAFT)
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+  provider          String? // fournisseur qui a envoyé (« onesignal », « fake »…)
+  providerMessageId String? // identifiant du message chez le fournisseur
+  recipients        Int? // destinataires atteints, si le fournisseur le dit
+  errorMessage      String?
   // Contenu associé (facultatif) : permet d'ouvrir la bonne page depuis la notification
-  eventId        String?            @db.Uuid
-  newsId         String?            @db.Uuid
-  dailyMessageId String?            @db.Uuid
-  createdById    String?            @db.Uuid
-  createdAt      DateTime           @default(now())
-  deletedAt      DateTime?
-  updatedAt      DateTime           @updatedAt
+  eventId           String?              @db.Uuid
+  newsId            String?              @db.Uuid
+  dailyMessageId    String?              @db.Uuid
+  sermonId          String?              @db.Uuid
+  attempts          Int                  @default(0)
+  lastAttemptAt     DateTime?
+  // Une seule notification automatique par contenu et par type d'événement (ex. « event.published:<id> »)
+  dedupeKey         String?              @unique
+  createdById       String?              @db.Uuid
+  createdAt         DateTime             @default(now())
+  deletedAt         DateTime?
+  updatedAt         DateTime             @updatedAt
 
   createdBy    Admin?                    @relation(fields: [createdById], references: [id], onDelete: SetNull)
   event        Event?                    @relation(fields: [eventId], references: [id], onDelete: SetNull)
   news         News?                     @relation(fields: [newsId], references: [id], onDelete: SetNull)
   dailyMessage DailyMessage?             @relation(fields: [dailyMessageId], references: [id], onDelete: SetNull)
+  sermon       Sermon?                   @relation(fields: [sermonId], references: [id], onDelete: SetNull)
+  logs         NotificationLog[]
   translations NotificationTranslation[]
 
   @@index([status, scheduledAt, deletedAt])
@@ -414,6 +450,8 @@ model Notification {
   @@index([eventId])
   @@index([newsId])
   @@index([dailyMessageId])
+  @@index([sermonId])
+  @@index([status, scheduledAt])
   @@map("notifications")
 }
 
@@ -423,6 +461,7 @@ model NotificationTranslation {
   language       Language
   title          String
   message        String
+  url            String? // chemin ouvert au toucher (ex. « /events/soiree-de-louange »), propre à la langue
 
   notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
 
@@ -855,14 +894,15 @@ model Sermon {
   deletedAt       DateTime?
   updatedAt       DateTime     @updatedAt
 
-  series       SermonSeries?       @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  coverImage   StorageFile?        @relation("SermonCover", fields: [coverImageId], references: [id], onDelete: SetNull)
-  audioFile    StorageFile?        @relation("SermonAudio", fields: [audioFileId], references: [id], onDelete: SetNull)
-  videoFile    StorageFile?        @relation("SermonVideo", fields: [videoFileId], references: [id], onDelete: SetNull)
-  createdBy    Admin?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  translations SermonTranslation[]
-  speakers     SermonSpeaker[]
-  documents    SermonDocument[]
+  series        SermonSeries?       @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  coverImage    StorageFile?        @relation("SermonCover", fields: [coverImageId], references: [id], onDelete: SetNull)
+  audioFile     StorageFile?        @relation("SermonAudio", fields: [audioFileId], references: [id], onDelete: SetNull)
+  videoFile     StorageFile?        @relation("SermonVideo", fields: [videoFileId], references: [id], onDelete: SetNull)
+  createdBy     Admin?              @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  translations  SermonTranslation[]
+  speakers      SermonSpeaker[]
+  documents     SermonDocument[]
+  notifications Notification[]
 
   @@index([status, date, deletedAt])
   @@index([status, publishAt])
@@ -940,4 +980,27 @@ model SermonDocumentTranslation {
 
   @@unique([documentId, language])
   @@map("sermon_document_translations")
+}
+
+// ----------------------------------------------------------------------------
+// Historique d'une notification (journal append-only) : création, planification, envoi, échec, annulation
+// ----------------------------------------------------------------------------
+
+model NotificationLog {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notificationId String               @db.Uuid
+  event          NotificationLogEvent
+  status         NotificationStatus? // statut de la notification APRÈS cet événement
+  message        String? // précision lisible (motif d'échec, d'annulation…)
+  attempt        Int? // numéro de tentative d'envoi concerné
+  data           Json? // détails techniques (réponse du fournisseur : jamais de secret)
+  adminId        String?              @db.Uuid // administrateur à l'origine ; vide = automatique
+  createdAt      DateTime             @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  admin        Admin?       @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([notificationId, createdAt])
+  @@index([createdAt])
+  @@map("notification_logs")
 }

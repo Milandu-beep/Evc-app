@@ -7,7 +7,9 @@ const adapter = new PrismaPg({ connectionString: env.databaseUrl });
 
 // Client brut : voit TOUT, y compris les lignes supprimées logiquement.
 // À réserver à la restauration, à la suppression définitive et aux tâches d'administration.
-export const prismaRaw = new PrismaClient({ adapter, log: ["warn", "error"] });
+// Transactions interactives : le délai par défaut de Prisma (5 s) est dépassé dès que la base distante est lente
+// (commit refusé, erreur 500 alors que les écritures étaient valides). Marge large, valable pour tous les services.
+export const prismaRaw = new PrismaClient({ adapter, log: ["warn", "error"], transactionOptions: { maxWait: 10_000, timeout: 30_000 } });
 
 // Modèles à suppression logique (colonne deletedAt).
 const SOFT_DELETE_MODELS = new Set([
