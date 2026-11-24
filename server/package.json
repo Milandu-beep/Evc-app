@@ -19,6 +19,7 @@
     "test:people": "node tests/people.test.mjs",
     "test:sermons": "node tests/sermons.test.mjs",
     "test:notifications": "node tests/notifications.test.mjs",
+    "test:dashboard": "node tests/dashboard.test.mjs",
     "test:dashboard:rules": "node tests/dashboard.rules.test.mjs"
   },
   "keywords": [],

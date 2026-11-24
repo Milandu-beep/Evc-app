@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const SUITES = [
-  "auth", "storage.stub", "events", "news", "dailyMessages", "gallery", "people", "sermons", "notifications", "dashboard.rules",
+  "auth", "storage.stub", "events", "news", "dailyMessages", "gallery", "people", "sermons", "notifications", "dashboard.rules", "dashboard",
 ];
 const only = process.argv.slice(2);
 const suites = only.length ? SUITES.filter((s) => only.includes(s)) : SUITES;
@@ -30,7 +30,7 @@ for (const suite of suites) {
   const ko = lines.filter((l) => l.startsWith("KO ")).length;
   const bad = code !== 0 || ko > 0 || ok === 0;
   if (bad) failed += 1;
-  console.log(`${bad ? "ÉCHEC" : "ok   "}  ${suite.padEnd(14)} ${ok} OK, ${ko} KO  (${Math.round((Date.now() - started) / 1000)} s)${code !== 0 ? `  [code ${code}]` : ""}`);
+  console.log(`${bad ? "ÉCHEC" : "ok   "}  ${suite.padEnd(16)} ${ok} OK, ${ko} KO  (${Math.round((Date.now() - started) / 1000)} s)${code !== 0 ? `  [code ${code}]` : ""}`);
   if (bad) {
     for (const l of lines.filter((l) => l.startsWith("KO "))) console.log("   " + l.slice(0, 300));
     if (ok === 0 || code !== 0) console.log(lines.filter((l) => l.trim() && !/\[INFO\]/.test(l)).slice(-8).map((l) => "   " + l.slice(0, 300)).join("\n"));
