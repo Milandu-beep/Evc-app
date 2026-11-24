@@ -13,6 +13,7 @@ import adminGalleryRoutes from "./admin.gallery.routes.js";
 import { adminRouter as adminPeopleRoutes, publicRouter as peopleRoutes } from "./people.routes.js";
 import { adminSermons, adminSeries, publicSermons, publicSeries } from "./sermons.routes.js";
 import { adminRouter as adminNotificationsRoutes, publicRouter as notificationsRoutes } from "./notifications.routes.js";
+import adminDashboardRoutes from "./admin.dashboard.routes.js";
 import { sendSuccess } from "../utils/response.js";
 import { API_VERSION } from "../config/constants.js";
 
@@ -41,6 +42,7 @@ router.use("/admin/sermons", adminSermons);
 router.use("/admin/sermon-series", adminSeries);
 router.use("/notifications", notificationsRoutes);
 router.use("/admin/notifications", adminNotificationsRoutes);
+router.use("/admin/dashboard", adminDashboardRoutes);
 
 // Les routes métier seront montées ici, sprint par sprint.
 

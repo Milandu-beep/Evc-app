@@ -87,7 +87,7 @@ La gestion des administrateurs est réservée au Super Admin : pour un Admin, le
 
 ## 6. Performances
 
-Une requête au tableau de bord exécute une quarantaine de comptages courts, en parallèle, tous couverts par les index existants
+Une requête au tableau de bord exécute une soixantaine de lectures courtes (comptages surtout), en parallèle, toutes couvertes par les index existants
 (`status`, `publishAt`, `deletedAt`, `createdAt`…) : aucune migration n'est nécessaire. Rien n'est mis en cache côté serveur
 (`Cache-Control: no-store`) : l'administration voit toujours l'état réel.
 
